@@ -7,11 +7,8 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Modal,
-  Pressable,
+  Linking,
 } from 'react-native';
-import { useTheme } from '@react-navigation/native';
-import { GlassView } from 'expo-glass-effect';
 import { authenticatedGet, authenticatedPost, authenticatedDelete } from '@/utils/api';
 import { IconSymbol } from '@/components/IconSymbol';
 import { colors } from '@/styles/commonStyles';
@@ -36,7 +33,6 @@ export default function ProfileScreen() {
   const [creditInfo, setCreditInfo] = useState<CreditInfo | null>(null);
   const [subscribing, setSubscribing] = useState(false);
   const { user, signOut } = useAuth();
-  const theme = useTheme();
 
   // Modal state
   const [modalVisible, setModalVisible] = useState(false);
@@ -114,19 +110,44 @@ export default function ProfileScreen() {
   const handleSubscribe = async (plan: 'monthly' | 'yearly') => {
     setSubscribing(true);
     try {
-      console.log(`[API] Subscribing to ${plan} plan...`);
-      const data = await authenticatedPost<{ success: boolean; checkoutUrl?: string }>(
-        '/api/subscribe',
+      console.log(`[API] Creating checkout session for ${plan} plan...`);
+      const data = await authenticatedPost<{ checkoutUrl: string; sessionId: string }>(
+        '/api/subscriptions/create-checkout',
         { plan }
       );
       if (data.checkoutUrl) {
-        showModal('Subscription', `Please complete payment at: ${data.checkoutUrl}`);
+        console.log('[API] Checkout URL received, opening browser...');
+        const canOpen = await Linking.canOpenURL(data.checkoutUrl);
+        if (canOpen) {
+          await Linking.openURL(data.checkoutUrl);
+          showModal(
+            '🔗 Payment Page Opened',
+            'Complete your payment in the browser. Your subscription will activate automatically after payment.',
+            [
+              {
+                text: 'Refresh Status',
+                onPress: async () => {
+                  setModalVisible(false);
+                  await fetchCredits();
+                },
+                style: 'default',
+              },
+              { text: 'OK', onPress: () => setModalVisible(false), style: 'cancel' },
+            ]
+          );
+        } else {
+          showModal(
+            '💳 Complete Payment',
+            `Please visit this URL to complete your payment:\n\n${data.checkoutUrl}`,
+            [{ text: 'OK', onPress: () => setModalVisible(false), style: 'default' }]
+          );
+        }
       } else {
-        showModal('Success', `Successfully subscribed to ${plan} plan!`);
+        showModal('✅ Success', `Successfully subscribed to ${plan} plan!`);
         await fetchCredits();
       }
     } catch (error: any) {
-      showModal('Subscription Failed', error.message || 'Failed to subscribe');
+      showModal('Subscription Failed', error.message || 'Failed to start subscription process');
     } finally {
       setSubscribing(false);
     }
@@ -158,17 +179,24 @@ export default function ProfileScreen() {
     );
   };
 
-  const subscriptionStatusText = creditInfo?.subscriptionStatus === 'free'
+  // Check if subscription is truly active (not expired)
+  const hasActiveSubscription = creditInfo
+    ? (creditInfo.subscriptionStatus === 'monthly' || creditInfo.subscriptionStatus === 'yearly') &&
+      creditInfo.subscriptionEndDate !== null &&
+      new Date(creditInfo.subscriptionEndDate) > new Date()
+    : false;
+
+  const subscriptionStatusText = !hasActiveSubscription
     ? 'Free Plan'
     : creditInfo?.subscriptionStatus === 'monthly'
-    ? 'Monthly Subscription'
-    : 'Yearly Subscription';
+    ? '✨ Monthly Subscription'
+    : '⭐ Yearly Subscription';
 
-  const subscriptionStatusEmoji = creditInfo?.subscriptionStatus === 'free' ? '🆓' : '✨';
+  const subscriptionStatusEmoji = !hasActiveSubscription ? '🆓' : creditInfo?.subscriptionStatus === 'yearly' ? '⭐' : '✨';
 
-  const creditsText = creditInfo?.subscriptionStatus === 'free'
-    ? `${creditInfo.credits} free edits remaining`
-    : 'Unlimited edits';
+  const creditsText = !hasActiveSubscription
+    ? `${creditInfo?.credits ?? 0} free edit${(creditInfo?.credits ?? 0) !== 1 ? 's' : ''} remaining`
+    : '∞ Unlimited edits';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -202,24 +230,88 @@ export default function ProfileScreen() {
 
             <View style={[
               styles.creditCard,
-              creditInfo.subscriptionStatus !== 'free' ? styles.creditCardPremium : styles.creditCardFree
+              hasActiveSubscription && creditInfo.subscriptionStatus === 'yearly'
+                ? styles.creditCardYearly
+                : hasActiveSubscription
+                ? styles.creditCardPremium
+                : styles.creditCardFree
             ]}>
               <View style={styles.creditHeader}>
-                <Text style={styles.creditTitle}>
-                  {subscriptionStatusEmoji} {subscriptionStatusText}
+                <Text style={[
+                  styles.creditTitle,
+                  hasActiveSubscription && creditInfo.subscriptionStatus === 'yearly' && styles.creditTitleYearly,
+                ]}>
+                  {subscriptionStatusText}
                 </Text>
-                {creditInfo.subscriptionStatus !== 'free' && creditInfo.subscriptionEndDate && (
+                {hasActiveSubscription && creditInfo.subscriptionEndDate && (
                   <Text style={styles.creditExpiry}>
-                    Renews: {new Date(creditInfo.subscriptionEndDate).toLocaleDateString()}
+                    Active until: {new Date(creditInfo.subscriptionEndDate).toLocaleDateString()}
                   </Text>
                 )}
               </View>
-              <Text style={styles.creditAmount}>{creditsText}</Text>
+              <Text style={[
+                styles.creditAmount,
+                hasActiveSubscription && styles.creditAmountUnlimited,
+              ]}>{creditsText}</Text>
+
+              {hasActiveSubscription && creditInfo.subscriptionStatus === 'yearly' && (
+                <View style={styles.yearlyPerksContainer}>
+                  <Text style={styles.yearlyPerksTitle}>Your Yearly Perks:</Text>
+                  <Text style={styles.yearlyPerkItem}>⚡ Highest priority processing queue</Text>
+                  <Text style={styles.yearlyPerkItem}>🎁 Early access to new features</Text>
+                  <Text style={styles.yearlyPerkItem}>💬 Priority customer support</Text>
+                  <Text style={styles.yearlyPerkItem}>🎨 Exclusive templates & effects</Text>
+                  <Text style={styles.yearlyPerkItem}>📊 Advanced analytics dashboard</Text>
+                  <Text style={styles.yearlyPerkItem}>📤 Direct social media posting</Text>
+                </View>
+              )}
+
+              {hasActiveSubscription && creditInfo.subscriptionStatus === 'monthly' && (
+                <View style={styles.monthlyPerksContainer}>
+                  <Text style={styles.monthlyPerkItem}>🎬 Priority processing</Text>
+                  <Text style={styles.monthlyPerkItem}>📤 Direct social media posting</Text>
+                </View>
+              )}
+
+              {hasActiveSubscription && (
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={() => {
+                    showModal(
+                      'Cancel Subscription',
+                      'Your subscription will remain active until the end of the billing period. Are you sure?',
+                      [
+                        { text: 'Keep Subscription', onPress: () => setModalVisible(false), style: 'cancel' },
+                        {
+                          text: 'Cancel Subscription',
+                          onPress: async () => {
+                            setModalVisible(false);
+                            try {
+                              console.log('[API] Canceling subscription...');
+                              const result = await authenticatedPost<{ success: boolean; message: string }>(
+                                '/api/subscriptions/cancel',
+                                {}
+                              );
+                              showModal('Subscription Cancelled', result.message || 'Your subscription has been cancelled.');
+                              await fetchCredits();
+                            } catch (error: any) {
+                              showModal('Error', error.message || 'Failed to cancel subscription.');
+                            }
+                          },
+                          style: 'destructive',
+                        },
+                      ]
+                    );
+                  }}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel Subscription</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
-            {creditInfo.subscriptionStatus === 'free' && (
+            {!hasActiveSubscription && (
               <View style={styles.subscriptionOptions}>
-                <Text style={styles.upgradeTitle}>Upgrade for Unlimited Edits</Text>
+                <Text style={styles.upgradeTitle}>🚀 Upgrade for Unlimited Edits</Text>
 
                 <TouchableOpacity
                   style={styles.planCard}
@@ -230,7 +322,7 @@ export default function ProfileScreen() {
                     <Text style={styles.planName}>Monthly Plan</Text>
                     <Text style={styles.planPrice}>€5/month</Text>
                   </View>
-                  <Text style={styles.planFeatures}>✨ Unlimited video edits</Text>
+                  <Text style={styles.planFeatures}>♾️ Unlimited video edits</Text>
                   <Text style={styles.planFeatures}>🎬 Priority processing</Text>
                   <Text style={styles.planFeatures}>📤 Direct social media posting</Text>
                   {subscribing ? (
@@ -248,22 +340,25 @@ export default function ProfileScreen() {
                   disabled={subscribing}
                 >
                   <View style={styles.bestValueBadge}>
-                    <Text style={styles.bestValueText}>BEST VALUE</Text>
+                    <Text style={styles.bestValueText}>⭐ BEST VALUE</Text>
                   </View>
                   <View style={styles.planHeader}>
                     <Text style={styles.planName}>Yearly Plan</Text>
-                    <Text style={styles.planPrice}>€50/year</Text>
+                    <Text style={[styles.planPrice, { color: '#F59E0B' }]}>€50/year</Text>
                   </View>
-                  <Text style={styles.planSavings}>Save €10 per year!</Text>
-                  <Text style={styles.planFeatures}>✨ Unlimited video edits</Text>
-                  <Text style={styles.planFeatures}>🎬 Priority processing</Text>
+                  <Text style={styles.planSavings}>💰 Save €10 per year!</Text>
+                  <Text style={styles.planFeatures}>♾️ Unlimited video edits</Text>
+                  <Text style={styles.planFeatures}>⚡ FASTEST priority processing</Text>
                   <Text style={styles.planFeatures}>📤 Direct social media posting</Text>
                   <Text style={styles.planFeatures}>🎁 Early access to new features</Text>
+                  <Text style={styles.planFeatures}>💬 Priority customer support</Text>
+                  <Text style={styles.planFeatures}>🎨 Exclusive templates & effects</Text>
+                  <Text style={styles.planFeatures}>📊 Advanced analytics dashboard</Text>
                   {subscribing ? (
                     <ActivityIndicator color={colors.primary} style={{ marginTop: 12 }} />
                   ) : (
                     <View style={[styles.planButton, styles.planButtonYearly]}>
-                      <Text style={styles.planButtonText}>Subscribe Yearly</Text>
+                      <Text style={styles.planButtonText}>Subscribe Yearly — Best Deal</Text>
                     </View>
                   )}
                 </TouchableOpacity>
@@ -416,8 +511,12 @@ const styles = StyleSheet.create({
     borderColor: colors.warning + '40',
   },
   creditCardPremium: {
-    backgroundColor: colors.primary + '15',
-    borderColor: colors.primary + '40',
+    backgroundColor: colors.primary + '20',
+    borderColor: colors.primary + '60',
+  },
+  creditCardYearly: {
+    backgroundColor: '#F59E0B20',
+    borderColor: '#F59E0B60',
   },
   creditHeader: {
     marginBottom: 12,
@@ -428,6 +527,9 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: 4,
   },
+  creditTitleYearly: {
+    color: '#F59E0B',
+  },
   creditExpiry: {
     fontSize: 13,
     color: colors.textSecondary,
@@ -436,13 +538,70 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: colors.text,
+    marginBottom: 12,
+  },
+  creditAmountUnlimited: {
+    color: colors.primary,
+    fontSize: 28,
+  },
+  yearlyPerksContainer: {
+    backgroundColor: '#F59E0B10',
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 4,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#F59E0B30',
+    gap: 6,
+  },
+  yearlyPerksTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#F59E0B',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  yearlyPerkItem: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
+  monthlyPerksContainer: {
+    backgroundColor: colors.primary + '10',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 4,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.primary + '30',
+    gap: 4,
+  },
+  monthlyPerkItem: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
+  cancelButton: {
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.error + '50',
+    marginTop: 4,
+  },
+  cancelButtonText: {
+    fontSize: 13,
+    color: colors.error,
+    fontWeight: '500',
   },
   subscriptionOptions: {
     gap: 16,
   },
   upgradeTitle: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '700',
     color: colors.text,
     marginBottom: 8,
   },
@@ -455,22 +614,22 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   planCardYearly: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primary + '10',
+    borderColor: '#F59E0B',
+    backgroundColor: '#F59E0B08',
   },
   bestValueBadge: {
     position: 'absolute',
-    top: -10,
-    right: 20,
-    backgroundColor: colors.primary,
+    top: -12,
+    right: 16,
+    backgroundColor: '#F59E0B',
     borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 4,
+    paddingVertical: 5,
   },
   bestValueText: {
     fontSize: 11,
     fontWeight: 'bold',
-    color: colors.text,
+    color: '#000',
     letterSpacing: 0.5,
   },
   planHeader: {
@@ -509,7 +668,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   planButtonYearly: {
-    backgroundColor: colors.primary,
+    backgroundColor: '#F59E0B',
   },
   planButtonText: {
     fontSize: 16,

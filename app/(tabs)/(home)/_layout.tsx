@@ -11,16 +11,6 @@ export default function HomeLayout() {
           title: 'VH Cuts',
         }}
       />
-      <Stack.Screen
-        name="project"
-        options={{
-          headerShown: true,
-          title: 'Project',
-          headerStyle: { backgroundColor: '#0A0A0F' },
-          headerTintColor: '#FFFFFF',
-          headerShadowVisible: false,
-        }}
-      />
     </Stack>
   );
 }

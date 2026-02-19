@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,12 +12,13 @@ import {
   TextInput,
   Pressable,
 } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { useAuth } from '@/contexts/AuthContext';
 import { authenticatedGet, authenticatedPost, BACKEND_URL, getBearerToken } from '@/utils/api';
+import { AppModal, ProjectDetail } from '@/components/LoadingButton';
 
 interface VideoProject {
   id: string;
@@ -32,8 +33,15 @@ interface VideoProject {
   createdAt: string;
 }
 
+interface CreditInfo {
+  credits: number;
+  subscriptionStatus: 'free' | 'monthly' | 'yearly';
+  subscriptionEndDate: string | null;
+}
+
 export default function HomeScreen() {
   const { user } = useAuth();
+  const router = useRouter();
 
   const [videoUri, setVideoUri] = useState<string | null>(null);
   const [videoFileName, setVideoFileName] = useState<string | null>(null);
@@ -43,6 +51,7 @@ export default function HomeScreen() {
   const [projects, setProjects] = useState<VideoProject[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [creditInfo, setCreditInfo] = useState<CreditInfo | null>(null);
 
   // Project detail modal
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -61,10 +70,20 @@ export default function HomeScreen() {
     setModalVisible(true);
   };
 
+  const fetchCredits = useCallback(async () => {
+    try {
+      console.log('[API] Fetching credits...');
+      const data = await authenticatedGet<CreditInfo>('/api/user/credits');
+      setCreditInfo(data);
+      console.log('[API] Credits fetched:', data);
+    } catch (error: any) {
+      console.error('[API] Failed to fetch credits:', error.message);
+    }
+  }, []);
+
   const fetchProjects = useCallback(async () => {
     try {
       console.log('[API] Fetching projects...');
-      // TODO: Backend Integration - GET /api/projects → [{ id, originalVideoUrl, editedVideoUrl, prompt, status, title, description, hashtags, thumbnailUrl, createdAt }]
       const data = await authenticatedGet<VideoProject[]>('/api/projects');
       setProjects(data);
       console.log('[API] Projects fetched:', data.length);
@@ -76,15 +95,15 @@ export default function HomeScreen() {
   useEffect(() => {
     if (user) {
       setLoadingProjects(true);
-      fetchProjects().finally(() => setLoadingProjects(false));
+      Promise.all([fetchProjects(), fetchCredits()]).finally(() => setLoadingProjects(false));
     }
-  }, [user, fetchProjects]);
+  }, [user, fetchProjects, fetchCredits]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchProjects();
+    await Promise.all([fetchProjects(), fetchCredits()]);
     setRefreshing(false);
-  }, [fetchProjects]);
+  }, [fetchProjects, fetchCredits]);
 
   const openProjectDetail = (projectId: string) => {
     setSelectedProjectId(projectId);
@@ -138,7 +157,6 @@ export default function HomeScreen() {
 
     try {
       console.log('[API] Uploading video to /api/upload/video...');
-      // TODO: Backend Integration - POST /api/upload/video (multipart form data with 'video' field) → { videoUrl, filename }
       const token = await getBearerToken();
 
       const formData = new FormData();
@@ -170,11 +188,39 @@ export default function HomeScreen() {
       setIsProcessing(true);
 
       console.log('[API] Creating project at /api/projects...');
-      // TODO: Backend Integration - POST /api/projects with { videoUrl, prompt } → { projectId, status }
-      const projectData = await authenticatedPost<{ projectId: string; status: string }>(
-        '/api/projects',
-        { videoUrl, prompt: prompt.trim() }
-      );
+      let projectData: { projectId: string; status: string };
+      try {
+        projectData = await authenticatedPost<{ projectId: string; status: string }>(
+          '/api/projects',
+          { videoUrl, prompt: prompt.trim() }
+        );
+      } catch (projectError: any) {
+        const errMsg = projectError.message || '';
+        if (errMsg.includes('insufficient_credits') || errMsg.includes('You need more credits') || errMsg.includes('400')) {
+          setIsProcessing(false);
+          showModal(
+            '💳 No Credits Remaining',
+            'You have used all your free edits. Upgrade to a subscription for unlimited video edits.',
+            [
+              {
+                text: 'Upgrade Now',
+                onPress: () => {
+                  setModalVisible(false);
+                  router.push('/(tabs)/profile');
+                },
+                style: 'default',
+              },
+              {
+                text: 'Cancel',
+                onPress: () => setModalVisible(false),
+                style: 'cancel',
+              },
+            ]
+          );
+          return;
+        }
+        throw projectError;
+      }
 
       console.log('[API] Project created:', projectData);
       const { projectId } = projectData;
@@ -184,7 +230,7 @@ export default function HomeScreen() {
       setPrompt('');
       setIsProcessing(false);
 
-      await fetchProjects();
+      await Promise.all([fetchProjects(), fetchCredits()]);
 
       showModal(
         '🎬 Processing Started!',
@@ -234,6 +280,32 @@ export default function HomeScreen() {
   const videoSelectedText = videoUri ? 'Video Selected ✓' : 'No video selected';
   const uploadButtonText = videoUri ? 'Change Video' : 'Upload Video';
 
+  // Check if subscription is truly active (not expired)
+  const hasActiveSubscription = creditInfo
+    ? (creditInfo.subscriptionStatus === 'monthly' || creditInfo.subscriptionStatus === 'yearly') &&
+      creditInfo.subscriptionEndDate !== null &&
+      new Date(creditInfo.subscriptionEndDate) > new Date()
+    : false;
+
+  const isSubscribed = hasActiveSubscription;
+  const creditsDisplay = isSubscribed ? '∞' : creditInfo?.credits.toString() || '0';
+
+  const getPlanEmoji = () => {
+    if (!isSubscribed) return '';
+    return creditInfo?.subscriptionStatus === 'yearly' ? '⭐' : '✨';
+  };
+
+  const getPlanLabel = () => {
+    if (!isSubscribed) return '';
+    return creditInfo?.subscriptionStatus === 'yearly' ? 'Yearly' : 'Monthly';
+  };
+
+  const creditsLabel = isSubscribed
+    ? `${getPlanEmoji()} ${getPlanLabel()} Plan — Unlimited Edits 🎬`
+    : creditInfo?.credits === 0
+    ? '⚠️ 0 credits left — Tap to upgrade'
+    : `⚡ ${creditInfo?.credits} free edit${creditInfo?.credits !== 1 ? 's' : ''} remaining — Tap to upgrade`;
+
   return (
     <>
       <Stack.Screen
@@ -255,6 +327,40 @@ export default function HomeScreen() {
           <Text style={styles.title}>AI Video Editor</Text>
           <Text style={styles.subtitle}>Upload, describe, and let AI edit your video</Text>
         </View>
+
+        {creditInfo && (
+          <TouchableOpacity
+            style={[
+              styles.creditBanner,
+              isSubscribed && creditInfo.subscriptionStatus === 'yearly'
+                ? styles.creditBannerYearly
+                : isSubscribed
+                ? styles.creditBannerSubscribed
+                : creditInfo.credits === 0
+                ? styles.creditBannerEmpty
+                : styles.creditBannerFree,
+            ]}
+            onPress={() => router.push('/(tabs)/profile')}
+            activeOpacity={0.8}
+          >
+            <View style={styles.creditBannerInner}>
+              <Text style={styles.creditBannerEmoji}>
+                {isSubscribed && creditInfo.subscriptionStatus === 'yearly' ? '⭐' : isSubscribed ? '✨' : creditInfo.credits === 0 ? '⚠️' : '⚡'}
+              </Text>
+              <View style={styles.creditBannerContent}>
+                <Text style={styles.creditBannerText}>{creditsLabel}</Text>
+                {isSubscribed && (
+                  <Text style={styles.creditBannerSub}>
+                    {creditInfo.subscriptionStatus === 'yearly'
+                      ? 'Highest priority · Early access · Exclusive templates'
+                      : 'Priority processing · Social media posting'}
+                  </Text>
+                )}
+              </View>
+              <Text style={styles.creditBannerArrow}>›</Text>
+            </View>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.uploadSection}>
           <TouchableOpacity
@@ -454,6 +560,55 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: colors.textSecondary,
+  },
+  creditBanner: {
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 20,
+    borderWidth: 1.5,
+  },
+  creditBannerSubscribed: {
+    backgroundColor: colors.primary + '20',
+    borderColor: colors.primary + '60',
+  },
+  creditBannerYearly: {
+    backgroundColor: '#F59E0B20',
+    borderColor: '#F59E0B60',
+  },
+  creditBannerFree: {
+    backgroundColor: colors.warning + '15',
+    borderColor: colors.warning + '40',
+  },
+  creditBannerEmpty: {
+    backgroundColor: colors.error + '15',
+    borderColor: colors.error + '40',
+  },
+  creditBannerInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  creditBannerEmoji: {
+    fontSize: 22,
+  },
+  creditBannerContent: {
+    flex: 1,
+  },
+  creditBannerText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  creditBannerSub: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  creditBannerArrow: {
+    fontSize: 20,
+    color: colors.textMuted,
+    fontWeight: '300',
   },
   uploadSection: {
     marginBottom: 28,
@@ -660,6 +815,3 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-
-// Import shared components from LoadingButton.tsx
-import { AppModal, ProjectDetail } from '@/components/LoadingButton';
