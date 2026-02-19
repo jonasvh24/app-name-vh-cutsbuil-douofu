@@ -264,8 +264,13 @@ export function registerVideoRoutes(app: App) {
           });
 
           app.logger.info(
-            { userId: session.user.id, remainingCredits: newCredits },
+            { userId: session.user.id, remainingCredits: newCredits, tier: "free" },
             "Credit deducted for video edit"
+          );
+        } else {
+          app.logger.info(
+            { userId: session.user.id, tier: user[0].subscriptionStatus },
+            "Unlimited edits available for subscription tier"
           );
         }
 

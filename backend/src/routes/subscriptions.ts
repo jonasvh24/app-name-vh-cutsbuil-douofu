@@ -161,13 +161,22 @@ export function registerSubscriptionRoutes(app: App) {
           return reply.status(404).send({ error: "User not found" });
         }
 
+        // Check if user has active subscription
+        const hasActiveSubscription =
+          (user[0].subscriptionStatus === "monthly" || user[0].subscriptionStatus === "yearly") &&
+          user[0].subscriptionEndDate &&
+          new Date(user[0].subscriptionEndDate) > new Date();
+
+        // For subscribers, return unlimited credits indicator
+        const credits = hasActiveSubscription ? 999999 : (user[0].credits || 0);
+
         app.logger.info(
-          { userId: session.user.id, credits: user[0].credits },
+          { userId: session.user.id, credits, subscriptionStatus: user[0].subscriptionStatus },
           "Credits fetched successfully"
         );
 
         return {
-          credits: user[0].credits || 0,
+          credits,
           subscriptionStatus: user[0].subscriptionStatus || "free",
           subscriptionEndDate: user[0].subscriptionEndDate ? user[0].subscriptionEndDate.toISOString() : null,
         };
@@ -267,11 +276,11 @@ export function registerSubscriptionRoutes(app: App) {
         if (hasActiveSubscription) {
           app.logger.info(
             { userId: session.user.id },
-            "User has active subscription, no credit deduction"
+            "User has active subscription, no credit deduction needed"
           );
           return {
             success: true,
-            remainingCredits: user[0].credits || 0,
+            remainingCredits: 999999, // Unlimited credits for subscribers
           };
         }
 
