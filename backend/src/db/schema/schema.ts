@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, uuid, integer } from 'drizzle-orm/pg-core';
 
 export const videoProjects = pgTable('video_projects', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -13,4 +13,13 @@ export const videoProjects = pgTable('video_projects', {
   thumbnailUrl: text('thumbnail_url'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
+export const creditTransactions = pgTable('credit_transactions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: text('user_id').notNull(),
+  amount: integer('amount').notNull(),
+  transactionType: text('transaction_type').notNull(),
+  description: text('description').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });

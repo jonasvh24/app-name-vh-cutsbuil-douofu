@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { eq } from "drizzle-orm";
 import * as schema from "../db/schema/schema.js";
+import * as authSchema from "../db/schema/auth-schema.js";
 import type { App } from "../index.js";
 import { gateway } from "@specific-dev/framework";
 import { generateText, generateObject } from "ai";
@@ -166,7 +167,10 @@ export function registerVideoRoutes(app: App) {
           },
           400: {
             type: "object",
-            properties: { error: { type: "string" } },
+            properties: {
+              error: { type: "string" },
+              message: { type: "string" },
+            },
           },
           401: {
             type: "object",
@@ -195,6 +199,39 @@ export function registerVideoRoutes(app: App) {
       const { videoUrl, prompt } = validation.data;
 
       try {
+        // Check credits before creating project
+        const user = await app.db
+          .select({
+            credits: authSchema.user.credits,
+            subscriptionStatus: authSchema.user.subscriptionStatus,
+            subscriptionEndDate: authSchema.user.subscriptionEndDate,
+          })
+          .from(authSchema.user)
+          .where(eq(authSchema.user.id, session.user.id));
+
+        if (!user.length) {
+          app.logger.warn({ userId: session.user.id }, "User not found");
+          return reply.status(404).send({ error: "User not found" });
+        }
+
+        // Check if user has active subscription
+        const hasActiveSubscription =
+          (user[0].subscriptionStatus === "monthly" || user[0].subscriptionStatus === "yearly") &&
+          user[0].subscriptionEndDate &&
+          new Date(user[0].subscriptionEndDate) > new Date();
+
+        // If free user, check if credits > 0
+        if (!hasActiveSubscription && (user[0].credits || 0) <= 0) {
+          app.logger.warn(
+            { userId: session.user.id, credits: user[0].credits },
+            "Insufficient credits for video edit"
+          );
+          return reply.status(400).send({
+            error: "insufficient_credits",
+            message: "You need more credits",
+          });
+        }
+
         const [project] = await app.db
           .insert(schema.videoProjects)
           .values({
@@ -209,6 +246,28 @@ export function registerVideoRoutes(app: App) {
           { projectId: project.id, userId: session.user.id },
           "Video project created"
         );
+
+        // Deduct credit if not subscribed
+        if (!hasActiveSubscription) {
+          const newCredits = (user[0].credits || 0) - 1;
+          await app.db
+            .update(authSchema.user)
+            .set({ credits: newCredits })
+            .where(eq(authSchema.user.id, session.user.id));
+
+          // Create transaction record
+          await app.db.insert(schema.creditTransactions).values({
+            userId: session.user.id,
+            amount: -1,
+            transactionType: "edit_used",
+            description: `Credit deducted for video edit (project ${project.id})`,
+          });
+
+          app.logger.info(
+            { userId: session.user.id, remainingCredits: newCredits },
+            "Credit deducted for video edit"
+          );
+        }
 
         // Start background processing
         processVideoInBackground(app, project.id, prompt).catch((err) => {

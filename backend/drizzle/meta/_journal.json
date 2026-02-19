@@ -8,6 +8,13 @@
       "when": 1771539032411,
       "tag": "20260219221032_woozy_lizard",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1771542329381,
+      "tag": "20260219230529_soft_exodus",
+      "breakpoints": true
     }
   ]
 }

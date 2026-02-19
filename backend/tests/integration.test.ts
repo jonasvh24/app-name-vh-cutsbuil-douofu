@@ -273,4 +273,193 @@ describe("API Integration Tests", () => {
       await expectStatus(res, 404);
     });
   });
+
+  // ============================================================================
+  // Credits Tests
+  // ============================================================================
+
+  describe("Credits Management", () => {
+    test("Get user credits requires authentication", async () => {
+      const res = await api("/api/user/credits");
+      await expectStatus(res, 401);
+    });
+
+    test("Get user credits successfully", async () => {
+      const res = await authenticatedApi("/api/user/credits", authToken);
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.credits).toBeDefined();
+      expect(typeof data.credits).toBe("number");
+      expect(data.subscriptionStatus).toBeDefined();
+      expect(["free", "monthly", "yearly"]).toContain(data.subscriptionStatus);
+    });
+
+    test("Deduct credits requires authentication", async () => {
+      const res = await api("/api/user/credits/deduct", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: "00000000-0000-0000-0000-000000000000",
+        }),
+      });
+      await expectStatus(res, 401);
+    });
+
+    test("Deduct credits with missing projectId fails", async () => {
+      const res = await authenticatedApi("/api/user/credits/deduct", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      await expectStatus(res, 400);
+    });
+
+    test("Deduct credits with invalid UUID format fails", async () => {
+      const res = await authenticatedApi("/api/user/credits/deduct", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: "invalid-uuid",
+        }),
+      });
+      await expectStatus(res, 400);
+    });
+
+    test("Deduct credits with nonexistent project fails", async () => {
+      const res = await authenticatedApi("/api/user/credits/deduct", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: "00000000-0000-0000-0000-000000000000",
+        }),
+      });
+      await expectStatus(res, 400);
+
+      const data = await res.json();
+      expect(data.error).toBeDefined();
+    });
+
+    test("Deduct credits for valid project successfully", async () => {
+      const res = await authenticatedApi("/api/user/credits/deduct", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: projectId,
+        }),
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.success).toBeDefined();
+      expect(typeof data.success).toBe("boolean");
+      expect(data.remainingCredits).toBeDefined();
+      expect(typeof data.remainingCredits).toBe("number");
+    });
+  });
+
+  // ============================================================================
+  // Subscriptions Tests
+  // ============================================================================
+
+  describe("Subscriptions Management", () => {
+    test("Get subscription status requires authentication", async () => {
+      const res = await api("/api/subscriptions/status");
+      await expectStatus(res, 401);
+    });
+
+    test("Get subscription status successfully", async () => {
+      const res = await authenticatedApi("/api/subscriptions/status", authToken);
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.status).toBeDefined();
+      expect(["free", "monthly", "yearly"]).toContain(data.status);
+      expect(data.hasActiveSubscription).toBeDefined();
+      expect(typeof data.hasActiveSubscription).toBe("boolean");
+    });
+
+    test("Create checkout requires authentication", async () => {
+      const res = await api("/api/subscriptions/create-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: "monthly",
+        }),
+      });
+      await expectStatus(res, 401);
+    });
+
+    test("Create checkout with invalid plan fails", async () => {
+      const res = await authenticatedApi("/api/subscriptions/create-checkout", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: "invalid-plan",
+        }),
+      });
+      await expectStatus(res, 400);
+    });
+
+    test("Create checkout with missing plan fails", async () => {
+      const res = await authenticatedApi("/api/subscriptions/create-checkout", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      await expectStatus(res, 400);
+    });
+
+    test("Create checkout for monthly plan successfully", async () => {
+      const res = await authenticatedApi("/api/subscriptions/create-checkout", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: "monthly",
+        }),
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.checkoutUrl).toBeDefined();
+      expect(typeof data.checkoutUrl).toBe("string");
+      expect(data.sessionId).toBeDefined();
+      expect(typeof data.sessionId).toBe("string");
+    });
+
+    test("Create checkout for yearly plan successfully", async () => {
+      const res = await authenticatedApi("/api/subscriptions/create-checkout", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: "yearly",
+        }),
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.checkoutUrl).toBeDefined();
+      expect(data.sessionId).toBeDefined();
+    });
+
+    test("Cancel subscription requires authentication", async () => {
+      const res = await api("/api/subscriptions/cancel", {
+        method: "POST",
+      });
+      await expectStatus(res, 401);
+    });
+
+    test("Cancel subscription successfully", async () => {
+      const res = await authenticatedApi("/api/subscriptions/cancel", authToken, {
+        method: "POST",
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.success).toBeDefined();
+      expect(typeof data.success).toBe("boolean");
+      expect(data.message).toBeDefined();
+      expect(typeof data.message).toBe("string");
+    });
+  });
 });
