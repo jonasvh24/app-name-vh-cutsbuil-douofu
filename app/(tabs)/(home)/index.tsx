@@ -12,7 +12,7 @@ import {
   TextInput,
   Pressable,
 } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
@@ -32,8 +32,15 @@ interface VideoProject {
   createdAt: string;
 }
 
+interface CreditInfo {
+  credits: number;
+  subscriptionStatus: 'free' | 'monthly' | 'yearly';
+  subscriptionEndDate: string | null;
+}
+
 export default function HomeScreen() {
   const { user } = useAuth();
+  const router = useRouter();
 
   const [videoUri, setVideoUri] = useState<string | null>(null);
   const [videoFileName, setVideoFileName] = useState<string | null>(null);
@@ -43,6 +50,7 @@ export default function HomeScreen() {
   const [projects, setProjects] = useState<VideoProject[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [creditInfo, setCreditInfo] = useState<CreditInfo | null>(null);
 
   // Project detail modal
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -61,10 +69,20 @@ export default function HomeScreen() {
     setModalVisible(true);
   };
 
+  const fetchCredits = useCallback(async () => {
+    try {
+      console.log('[API] Fetching credits...');
+      const data = await authenticatedGet<CreditInfo>('/api/user/credits');
+      setCreditInfo(data);
+      console.log('[API] Credits fetched:', data);
+    } catch (error: any) {
+      console.error('[API] Failed to fetch credits:', error.message);
+    }
+  }, []);
+
   const fetchProjects = useCallback(async () => {
     try {
       console.log('[API] Fetching projects...');
-      // TODO: Backend Integration - GET /api/projects → [{ id, originalVideoUrl, editedVideoUrl, prompt, status, title, description, hashtags, thumbnailUrl, createdAt }]
       const data = await authenticatedGet<VideoProject[]>('/api/projects');
       setProjects(data);
       console.log('[API] Projects fetched:', data.length);
@@ -76,15 +94,15 @@ export default function HomeScreen() {
   useEffect(() => {
     if (user) {
       setLoadingProjects(true);
-      fetchProjects().finally(() => setLoadingProjects(false));
+      Promise.all([fetchProjects(), fetchCredits()]).finally(() => setLoadingProjects(false));
     }
-  }, [user, fetchProjects]);
+  }, [user, fetchProjects, fetchCredits]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchProjects();
+    await Promise.all([fetchProjects(), fetchCredits()]);
     setRefreshing(false);
-  }, [fetchProjects]);
+  }, [fetchProjects, fetchCredits]);
 
   const openProjectDetail = (projectId: string) => {
     setSelectedProjectId(projectId);
@@ -170,11 +188,40 @@ export default function HomeScreen() {
       setIsProcessing(true);
 
       console.log('[API] Creating project at /api/projects...');
-      // TODO: Backend Integration - POST /api/projects with { videoUrl, prompt } → { projectId, status }
-      const projectData = await authenticatedPost<{ projectId: string; status: string }>(
-        '/api/projects',
-        { videoUrl, prompt: prompt.trim() }
-      );
+      let projectData: { projectId: string; status: string };
+      try {
+        projectData = await authenticatedPost<{ projectId: string; status: string }>(
+          '/api/projects',
+          { videoUrl, prompt: prompt.trim() }
+        );
+      } catch (projectError: any) {
+        // Check for insufficient credits error
+        const errMsg = projectError.message || '';
+        if (errMsg.includes('insufficient_credits') || errMsg.includes('You need more credits') || errMsg.includes('400')) {
+          setIsProcessing(false);
+          showModal(
+            '💳 No Credits Remaining',
+            'You have used all your free edits. Upgrade to a subscription for unlimited video edits.',
+            [
+              {
+                text: 'Upgrade Now',
+                onPress: () => {
+                  setModalVisible(false);
+                  router.push('/(tabs)/profile');
+                },
+                style: 'default',
+              },
+              {
+                text: 'Cancel',
+                onPress: () => setModalVisible(false),
+                style: 'cancel',
+              },
+            ]
+          );
+          return;
+        }
+        throw projectError;
+      }
 
       console.log('[API] Project created:', projectData);
       const { projectId } = projectData;
@@ -184,7 +231,7 @@ export default function HomeScreen() {
       setPrompt('');
       setIsProcessing(false);
 
-      await fetchProjects();
+      await Promise.all([fetchProjects(), fetchCredits()]);
 
       showModal(
         '🎬 Processing Started!',
@@ -255,6 +302,28 @@ export default function HomeScreen() {
           <Text style={styles.title}>AI Video Editor</Text>
           <Text style={styles.subtitle}>Upload, describe, and let AI edit your video</Text>
         </View>
+
+        {creditInfo && (
+          <TouchableOpacity
+            style={[
+              styles.creditBanner,
+              creditInfo.subscriptionStatus !== 'free'
+                ? styles.creditBannerSubscribed
+                : creditInfo.credits === 0
+                ? styles.creditBannerEmpty
+                : styles.creditBannerFree,
+            ]}
+            onPress={() => router.push('/(tabs)/profile')}
+          >
+            <Text style={styles.creditBannerText}>
+              {creditInfo.subscriptionStatus !== 'free'
+                ? `✨ ${creditInfo.subscriptionStatus === 'monthly' ? 'Monthly' : 'Yearly'} Plan — Unlimited Edits`
+                : creditInfo.credits === 0
+                ? '⚠️ 0 credits left — Tap to upgrade'
+                : `⚡ ${creditInfo.credits} free edit${creditInfo.credits !== 1 ? 's' : ''} remaining — Tap to upgrade`}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.uploadSection}>
           <TouchableOpacity
@@ -853,7 +922,7 @@ const styles = StyleSheet.create({
     paddingBottom: 120,
   },
   header: {
-    marginBottom: 28,
+    marginBottom: 16,
   },
   title: {
     fontSize: 32,
@@ -864,6 +933,31 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: colors.textSecondary,
+  },
+  creditBanner: {
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 20,
+    borderWidth: 1,
+  },
+  creditBannerSubscribed: {
+    backgroundColor: colors.primary + '15',
+    borderColor: colors.primary + '40',
+  },
+  creditBannerFree: {
+    backgroundColor: colors.warning + '15',
+    borderColor: colors.warning + '40',
+  },
+  creditBannerEmpty: {
+    backgroundColor: colors.error + '15',
+    borderColor: colors.error + '40',
+  },
+  creditBannerText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+    textAlign: 'center',
   },
   uploadSection: {
     marginBottom: 28,
