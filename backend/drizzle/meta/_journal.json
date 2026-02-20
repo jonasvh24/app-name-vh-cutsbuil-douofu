@@ -15,6 +15,13 @@
       "when": 1771542329381,
       "tag": "20260219230529_soft_exodus",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1771547023142,
+      "tag": "20260220002343_silly_blue_blade",
+      "breakpoints": true
     }
   ]
 }

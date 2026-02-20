@@ -1,0 +1,1 @@
+ALTER TABLE "video_projects" ADD COLUMN "music_url" text;

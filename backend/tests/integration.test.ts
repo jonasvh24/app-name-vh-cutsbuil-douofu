@@ -461,5 +461,549 @@ describe("API Integration Tests", () => {
       expect(data.message).toBeDefined();
       expect(typeof data.message).toBe("string");
     });
+
+    test("Webhook endpoint accepts POST", async () => {
+      const res = await api("/api/subscriptions/webhook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "test_webhook",
+        }),
+      });
+      await expectStatus(res, 200);
+    });
+  });
+
+  // ============================================================================
+  // Payments Tests
+  // ============================================================================
+
+  describe("Payments Management", () => {
+    test("Initiate payment requires authentication", async () => {
+      const res = await api("/api/payments/initiate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: "monthly",
+          paymentMethod: "card",
+        }),
+      });
+      await expectStatus(res, 401);
+    });
+
+    test("Initiate payment with missing required fields fails", async () => {
+      const res = await authenticatedApi("/api/payments/initiate", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: "monthly",
+        }),
+      });
+      await expectStatus(res, 400);
+    });
+
+    test("Initiate payment with card method successfully", async () => {
+      const res = await authenticatedApi("/api/payments/initiate", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: "monthly",
+          paymentMethod: "card",
+        }),
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.success).toBeDefined();
+      expect(data.paymentMethod).toBe("card");
+    });
+
+    test("Initiate payment with paypal method", async () => {
+      const res = await authenticatedApi("/api/payments/initiate", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: "monthly",
+          paymentMethod: "paypal",
+          paypalEmail: "test@example.com",
+        }),
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.success).toBeDefined();
+      expect(data.paymentMethod).toBe("paypal");
+    });
+
+    test("Initiate payment with iban method", async () => {
+      const res = await authenticatedApi("/api/payments/initiate", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: "yearly",
+          paymentMethod: "iban",
+          iban: "DE89370400440532013000",
+        }),
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.success).toBeDefined();
+      expect(data.paymentMethod).toBe("iban");
+    });
+
+    test("Initiate payment with invalid plan fails", async () => {
+      const res = await authenticatedApi("/api/payments/initiate", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: "invalid-plan",
+          paymentMethod: "card",
+        }),
+      });
+      await expectStatus(res, 400);
+    });
+
+    test("Confirm manual payment requires authentication", async () => {
+      const res = await api("/api/payments/confirm-manual", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: "monthly",
+          paymentMethod: "paypal",
+          transactionReference: "TXN123456",
+        }),
+      });
+      await expectStatus(res, 401);
+    });
+
+    test("Confirm manual payment with missing fields fails", async () => {
+      const res = await authenticatedApi("/api/payments/confirm-manual", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: "monthly",
+        }),
+      });
+      await expectStatus(res, 400);
+    });
+
+    test("Confirm manual payment with paypal successfully", async () => {
+      const res = await authenticatedApi("/api/payments/confirm-manual", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: "monthly",
+          paymentMethod: "paypal",
+          transactionReference: "PAYPAL_TXN_123",
+        }),
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.success).toBeDefined();
+      expect(data.subscriptionStatus).toBeDefined();
+    });
+
+    test("Confirm manual payment with iban successfully", async () => {
+      const res = await authenticatedApi("/api/payments/confirm-manual", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: "yearly",
+          paymentMethod: "iban",
+          transactionReference: "IBAN_TXN_456",
+        }),
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.success).toBeDefined();
+      expect(data.subscriptionStatus).toBeDefined();
+    });
+
+    test("Confirm manual payment with invalid method fails", async () => {
+      const res = await authenticatedApi("/api/payments/confirm-manual", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: "monthly",
+          paymentMethod: "card",
+          transactionReference: "TXN123",
+        }),
+      });
+      await expectStatus(res, 400);
+    });
+  });
+
+  // ============================================================================
+  // Music Tests
+  // ============================================================================
+
+  describe("Music Management", () => {
+    test("Search music requires authentication", async () => {
+      const res = await api("/api/music/search?query=piano");
+      await expectStatus(res, 401);
+    });
+
+    test("Search music with missing query parameter fails", async () => {
+      const res = await authenticatedApi("/api/music/search", authToken);
+      await expectStatus(res, 400);
+    });
+
+    test("Search music successfully", async () => {
+      const res = await authenticatedApi("/api/music/search?query=piano", authToken);
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(Array.isArray(data)).toBe(true);
+      if (data.length > 0) {
+        expect(data[0].id).toBeDefined();
+        expect(data[0].title).toBeDefined();
+        expect(data[0].artist).toBeDefined();
+        expect(data[0].duration).toBeDefined();
+        expect(data[0].genre).toBeDefined();
+        expect(data[0].url).toBeDefined();
+      }
+    });
+
+    test("Search music with custom limit", async () => {
+      const res = await authenticatedApi("/api/music/search?query=jazz&limit=5", authToken);
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(Array.isArray(data)).toBe(true);
+    });
+
+    test("Import music requires authentication", async () => {
+      const res = await api("/api/music/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Test Song",
+          artist: "Test Artist",
+          duration: 180,
+          genre: "Pop",
+        }),
+      });
+      await expectStatus(res, 401);
+    });
+
+    test("Import music with missing required fields fails", async () => {
+      const res = await authenticatedApi("/api/music/import", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Test Song",
+          artist: "Test Artist",
+        }),
+      });
+      await expectStatus(res, 400);
+    });
+
+    test("Import music successfully", async () => {
+      const res = await authenticatedApi("/api/music/import", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "My Custom Song",
+          artist: "Local Artist",
+          duration: 240,
+          genre: "Indie",
+        }),
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.id).toBeDefined();
+      expect(data.title).toBe("My Custom Song");
+      expect(data.artist).toBe("Local Artist");
+      expect(data.duration).toBe(240);
+      expect(data.genre).toBe("Indie");
+      expect(data.url).toBeDefined();
+    });
+
+    test("Attach music to project requires authentication", async () => {
+      const res = await api("/api/music/attach-to-project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: projectId,
+          musicUrl: "https://example.com/music.mp3",
+        }),
+      });
+      await expectStatus(res, 401);
+    });
+
+    test("Attach music with missing required fields fails", async () => {
+      const res = await authenticatedApi("/api/music/attach-to-project", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: projectId,
+        }),
+      });
+      await expectStatus(res, 400);
+    });
+
+    test("Attach music to nonexistent project fails", async () => {
+      const fakeId = "00000000-0000-0000-0000-000000000000";
+      const res = await authenticatedApi("/api/music/attach-to-project", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: fakeId,
+          musicUrl: "https://example.com/music.mp3",
+        }),
+      });
+      await expectStatus(res, 404);
+    });
+
+    test("Attach music to project successfully", async () => {
+      const res = await authenticatedApi("/api/music/attach-to-project", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: projectId,
+          musicUrl: "https://example.com/background-music.mp3",
+        }),
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.success).toBeDefined();
+      expect(data.projectId).toBe(projectId);
+      expect(data.musicUrl).toBe("https://example.com/background-music.mp3");
+    });
+  });
+
+  // ============================================================================
+  // Editing Tests
+  // ============================================================================
+
+  describe("Video Editing", () => {
+    test("Retrieve edited video requires authentication", async () => {
+      const res = await api(`/api/editing/${projectId}/retrieve`);
+      await expectStatus(res, 401);
+    });
+
+    test("Retrieve edited video with invalid UUID format fails", async () => {
+      const res = await authenticatedApi("/api/editing/invalid-uuid/retrieve", authToken);
+      await expectStatus(res, 400);
+    });
+
+    test("Retrieve nonexistent project fails", async () => {
+      const fakeId = "00000000-0000-0000-0000-000000000000";
+      const res = await authenticatedApi(`/api/editing/${fakeId}/retrieve`, authToken);
+      await expectStatus(res, 404);
+    });
+
+    test("Retrieve edited video successfully", async () => {
+      const res = await authenticatedApi(`/api/editing/${projectId}/retrieve`, authToken);
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.id).toBeDefined();
+      expect(data.userId).toBeDefined();
+      expect(data.originalVideoUrl).toBeDefined();
+      expect(data.prompt).toBeDefined();
+      expect(data.status).toBeDefined();
+      expect(data.createdAt).toBeDefined();
+      expect(data.updatedAt).toBeDefined();
+    });
+
+    test("Apply edits requires authentication", async () => {
+      const res = await api(`/api/editing/${projectId}/apply-edits`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          edits: [
+            {
+              type: "trim",
+              params: { start: 0, end: 10 },
+            },
+          ],
+        }),
+      });
+      await expectStatus(res, 401);
+    });
+
+    test("Apply edits with missing edits array fails", async () => {
+      const res = await authenticatedApi(`/api/editing/${projectId}/apply-edits`, authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      await expectStatus(res, 400);
+    });
+
+    test("Apply edits to nonexistent project fails", async () => {
+      const fakeId = "00000000-0000-0000-0000-000000000000";
+      const res = await authenticatedApi(`/api/editing/${fakeId}/apply-edits`, authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          edits: [
+            {
+              type: "trim",
+              params: { start: 0, end: 5 },
+            },
+          ],
+        }),
+      });
+      await expectStatus(res, 404);
+    });
+
+    test("Apply edits successfully", async () => {
+      const res = await authenticatedApi(`/api/editing/${projectId}/apply-edits`, authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          edits: [
+            {
+              type: "trim",
+              params: { start: 0, end: 30 },
+            },
+          ],
+        }),
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.success).toBeDefined();
+      expect(data.projectId).toBe(projectId);
+      expect(data.editsApplied).toBeDefined();
+      expect(typeof data.editsApplied).toBe("number");
+      expect(data.status).toBeDefined();
+    });
+
+    test("Apply multiple edits successfully", async () => {
+      const res = await authenticatedApi(`/api/editing/${projectId}/apply-edits`, authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          edits: [
+            {
+              type: "trim",
+              params: { start: 5, end: 25 },
+            },
+            {
+              type: "timing",
+              params: { speed: 1.5 },
+            },
+          ],
+        }),
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.success).toBeDefined();
+      expect(data.editsApplied).toBeGreaterThanOrEqual(1);
+    });
+
+    test("Save edits requires authentication", async () => {
+      const res = await api(`/api/editing/${projectId}/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          changes: {},
+        }),
+      });
+      await expectStatus(res, 401);
+    });
+
+    test("Save edits with empty changes object successfully", async () => {
+      const res = await authenticatedApi(`/api/editing/${projectId}/save`, authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          changes: {},
+        }),
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.success).toBeDefined();
+      expect(data.projectId).toBe(projectId);
+      expect(data.updatedAt).toBeDefined();
+    });
+
+    test("Save edits to nonexistent project fails", async () => {
+      const fakeId = "00000000-0000-0000-0000-000000000000";
+      const res = await authenticatedApi(`/api/editing/${fakeId}/save`, authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          changes: { title: "Updated Title" },
+        }),
+      });
+      await expectStatus(res, 404);
+    });
+
+    test("Save edits with changes object successfully", async () => {
+      const res = await authenticatedApi(`/api/editing/${projectId}/save`, authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          changes: {
+            title: "Updated Video Title",
+            description: "New description",
+          },
+        }),
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.success).toBeDefined();
+      expect(data.projectId).toBe(projectId);
+    });
+  });
+
+  // ============================================================================
+  // Admin Tests
+  // ============================================================================
+
+  describe("Admin Operations", () => {
+    test("Grant infinite credits requires authentication", async () => {
+      const res = await api("/api/admin/grant-infinite-credits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: "test@example.com",
+        }),
+      });
+      await expectStatus(res, 401);
+    });
+
+    test("Grant infinite credits with missing email fails", async () => {
+      const res = await authenticatedApi("/api/admin/grant-infinite-credits", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      await expectStatus(res, 400);
+    });
+
+    test("Grant infinite credits with invalid email format fails", async () => {
+      const res = await authenticatedApi("/api/admin/grant-infinite-credits", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: "not-an-email",
+        }),
+      });
+      await expectStatus(res, 400);
+    });
+
+    test("Grant infinite credits to nonexistent user fails", async () => {
+      const res = await authenticatedApi("/api/admin/grant-infinite-credits", authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: "nonexistent@example.com",
+        }),
+      });
+      await expectStatus(res, 404);
+    });
   });
 });

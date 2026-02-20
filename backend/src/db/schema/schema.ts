@@ -11,6 +11,7 @@ export const videoProjects = pgTable('video_projects', {
   description: text('description'),
   hashtags: text('hashtags'),
   thumbnailUrl: text('thumbnail_url'),
+  musicUrl: text('music_url'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
 });
