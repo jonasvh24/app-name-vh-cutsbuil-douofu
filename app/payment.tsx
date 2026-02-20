@@ -9,6 +9,7 @@ import {
   TextInput,
   ActivityIndicator,
   Linking,
+  Alert,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { colors } from '@/styles/commonStyles';
@@ -47,13 +48,41 @@ export default function PaymentScreen() {
     try {
       if (selectedMethod === 'card') {
         console.log('[API] Initiating Stripe checkout...');
-        const data = await authenticatedPost<{ checkoutUrl: string }>('/api/subscriptions/create-checkout', {
+        const data = await authenticatedPost<{ checkoutUrl: string; sessionId: string }>('/api/subscriptions/create-checkout', {
           plan: selectedPlan,
         });
-        console.log('[API] Stripe checkout URL:', data.checkoutUrl);
+        console.log('[API] Stripe checkout response:', data);
+
+        if (!data.checkoutUrl) {
+          throw new Error('No checkout URL received from server');
+        }
+
+        // Check if this is a mock/test URL
+        const isMockUrl = data.checkoutUrl.includes('checkout.stripe.com/pay/cs_') && 
+                          data.sessionId.startsWith('cs_') && 
+                          data.sessionId.length < 30;
+
+        if (isMockUrl) {
+          setProcessing(false);
+          showModal(
+            '⚠️ Test Mode',
+            'Stripe is not configured on the backend. This is a test checkout URL.\n\nIn production, this would redirect you to Stripe to complete payment.\n\nFor now, you can use PayPal or Bank Transfer to test the manual payment flow.'
+          );
+          return;
+        }
+
+        // Try to open the URL
+        const canOpen = await Linking.canOpenURL(data.checkoutUrl);
+        if (!canOpen) {
+          throw new Error('Cannot open checkout URL. Please try a different payment method.');
+        }
+
         await Linking.openURL(data.checkoutUrl);
         setProcessing(false);
-        showModal('Redirected to Payment', 'Complete your payment in the browser. Your subscription will activate automatically.');
+        showModal(
+          'Redirected to Payment',
+          'Complete your payment in the browser. Your subscription will activate automatically once payment is confirmed.'
+        );
       } else {
         console.log('[API] Initiating manual payment...');
         const data = await authenticatedPost<{
@@ -68,6 +97,7 @@ export default function PaymentScreen() {
           paymentMethod: selectedMethod,
         });
 
+        console.log('[API] Manual payment initiated:', data);
         setProcessing(false);
         setShowManualConfirm(true);
 
@@ -80,7 +110,8 @@ export default function PaymentScreen() {
     } catch (error: any) {
       console.error('[API] Payment initiation failed:', error);
       setProcessing(false);
-      showModal('Payment Error', error.message || 'Failed to initiate payment. Please try again.');
+      const errorMessage = error.message || 'Failed to initiate payment. Please try again.';
+      showModal('Payment Error', errorMessage);
     }
   };
 
@@ -114,7 +145,8 @@ export default function PaymentScreen() {
     } catch (error: any) {
       console.error('[API] Payment confirmation failed:', error);
       setProcessing(false);
-      showModal('Confirmation Error', error.message || 'Failed to confirm payment. Please contact support.');
+      const errorMessage = error.message || 'Failed to confirm payment. Please contact support.';
+      showModal('Confirmation Error', errorMessage);
     }
   };
 
