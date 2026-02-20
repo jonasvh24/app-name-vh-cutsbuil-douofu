@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "VH Cuts",
-    "slug": "vh-cuts",
+    "name": "app-name-vh-cutsbuil",
+    "slug": "app-name-vh-cutsbuil",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/app-icon-tmf.png",
@@ -36,7 +36,7 @@
       "expo-router",
       "expo-web-browser"
     ],
-    "scheme": "vh-cuts",
+    "scheme": "app-name-vh-cutsbuil",
     "experiments": {
       "typedRoutes": true
     },

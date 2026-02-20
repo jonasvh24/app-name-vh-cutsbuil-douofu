@@ -268,6 +268,7 @@ const modalStyles = StyleSheet.create({
 import { useEffect, useCallback, useRef } from "react";
 import { TextInput } from "react-native";
 import { authenticatedGet, authenticatedPost } from "@/utils/api";
+import { useRouter } from "expo-router";
 
 export interface VideoProject {
   id: string;
@@ -288,6 +289,7 @@ interface ProjectDetailProps {
 }
 
 export function ProjectDetail({ projectId, onBack }: ProjectDetailProps) {
+  const router = useRouter();
   const [project, setProject] = React.useState<VideoProject | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [regenerating, setRegenerating] = React.useState(false);
@@ -477,20 +479,36 @@ export function ProjectDetail({ projectId, onBack }: ProjectDetailProps) {
         )}
 
         {project.status === 'completed' && (
-          <View style={pdStyles.actionsSection}>
-            <Text style={pdStyles.label}>Publish</Text>
-            <Pressable style={pdStyles.publishBtn} onPress={showPublishOptions} disabled={publishing}>
-              {publishing ? <ActivityIndicator color={colors.text} size="small" /> : null}
-              <Text style={pdStyles.publishBtnText}>{publishing ? 'Publishing...' : '📤 Post to Social Media'}</Text>
-            </Pressable>
-            <Pressable
-              style={pdStyles.publishBothBtn}
-              onPress={() => handlePublish(['tiktok', 'youtube'])}
-              disabled={publishing}
-            >
-              <Text style={pdStyles.publishBothBtnText}>Post to TikTok & YouTube</Text>
-            </Pressable>
-          </View>
+          <>
+            <View style={pdStyles.editorSection}>
+              <Text style={pdStyles.label}>Edit Video</Text>
+              <Pressable
+                style={pdStyles.editorBtn}
+                onPress={() => {
+                  console.log('User tapped Open Editor - navigating to /editor/' + project.id);
+                  router.push(`/editor/${project.id}` as any);
+                }}
+              >
+                <Text style={pdStyles.editorBtnText}>✏️ Open Simple Editor</Text>
+              </Pressable>
+              <Text style={pdStyles.editorHint}>Customize title, description, hashtags, and add music</Text>
+            </View>
+
+            <View style={pdStyles.actionsSection}>
+              <Text style={pdStyles.label}>Publish</Text>
+              <Pressable style={pdStyles.publishBtn} onPress={showPublishOptions} disabled={publishing}>
+                {publishing ? <ActivityIndicator color={colors.text} size="small" /> : null}
+                <Text style={pdStyles.publishBtnText}>{publishing ? 'Publishing...' : '📤 Post to Social Media'}</Text>
+              </Pressable>
+              <Pressable
+                style={pdStyles.publishBothBtn}
+                onPress={() => handlePublish(['tiktok', 'youtube'])}
+                disabled={publishing}
+              >
+                <Text style={pdStyles.publishBothBtnText}>Post to TikTok & YouTube</Text>
+              </Pressable>
+            </View>
+          </>
         )}
 
         <View style={pdStyles.regenerateSection}>
@@ -561,6 +579,10 @@ const pdStyles = StyleSheet.create({
   processingCard: { backgroundColor: colors.card, borderRadius: 16, padding: 28, alignItems: 'center' as const, marginBottom: 20, borderWidth: 1, borderColor: colors.warning + '40', gap: 12 },
   processingTitle: { fontSize: 18, fontWeight: 'bold' as const, color: colors.text, textAlign: 'center' as const },
   processingSubtitle: { fontSize: 14, color: colors.textSecondary, textAlign: 'center' as const, lineHeight: 20 },
+  editorSection: { marginBottom: 24 },
+  editorBtn: { backgroundColor: colors.card, borderRadius: 14, padding: 16, alignItems: 'center' as const, borderWidth: 2, borderColor: colors.primary, marginBottom: 8 },
+  editorBtnText: { fontSize: 16, fontWeight: '600' as const, color: colors.text },
+  editorHint: { fontSize: 13, color: colors.textMuted, textAlign: 'center' as const },
   actionsSection: { marginBottom: 24 },
   publishBtn: { backgroundColor: colors.primary, borderRadius: 14, padding: 18, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 10, marginBottom: 12 },
   publishBtnText: { fontSize: 17, fontWeight: 'bold' as const, color: colors.text },

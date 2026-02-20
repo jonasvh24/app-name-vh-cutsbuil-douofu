@@ -9,12 +9,13 @@ import {
   ActivityIndicator,
   Linking,
 } from 'react-native';
-import { authenticatedGet, authenticatedPost, authenticatedDelete } from '@/utils/api';
-import { IconSymbol } from '@/components/IconSymbol';
-import { colors } from '@/styles/commonStyles';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
+import { colors } from '@/styles/commonStyles';
+import { IconSymbol } from '@/components/IconSymbol';
 import { AppModal } from '@/components/LoadingButton';
+import { authenticatedGet, authenticatedPost, authenticatedDelete } from '@/utils/api';
+import { useRouter } from 'expo-router';
 
 interface SocialConnection {
   platform: string;
@@ -28,17 +29,19 @@ interface CreditInfo {
 }
 
 export default function ProfileScreen() {
-  const [connections, setConnections] = useState<SocialConnection[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [creditInfo, setCreditInfo] = useState<CreditInfo | null>(null);
-  const [subscribing, setSubscribing] = useState(false);
   const { user, signOut } = useAuth();
+  const router = useRouter();
+  const [connections, setConnections] = useState<SocialConnection[]>([]);
+  const [loadingConnections, setLoadingConnections] = useState(false);
+  const [creditInfo, setCreditInfo] = useState<CreditInfo | null>(null);
+  const [loadingCredits, setLoadingCredits] = useState(false);
 
-  // Modal state
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
   const [modalMessage, setModalMessage] = useState('');
   const [modalButtons, setModalButtons] = useState<any[]>([]);
+
+  const [signOutModalVisible, setSignOutModalVisible] = useState(false);
 
   const showModal = (title: string, message: string, buttons?: any[]) => {
     setModalTitle(title);
@@ -47,12 +50,8 @@ export default function ProfileScreen() {
     setModalVisible(true);
   };
 
-  useEffect(() => {
-    fetchConnections();
-    fetchCredits();
-  }, []);
-
   const fetchCredits = async () => {
+    setLoadingCredits(true);
     try {
       console.log('[API] Fetching credits...');
       const data = await authenticatedGet<CreditInfo>('/api/user/credits');
@@ -60,10 +59,13 @@ export default function ProfileScreen() {
       console.log('[API] Credits fetched:', data);
     } catch (error: any) {
       console.error('[API] Failed to fetch credits:', error.message);
+    } finally {
+      setLoadingCredits(false);
     }
   };
 
   const fetchConnections = async () => {
+    setLoadingConnections(true);
     try {
       console.log('[API] Fetching social connections...');
       const data = await authenticatedGet<SocialConnection[]>('/api/social/connections');
@@ -76,340 +78,200 @@ export default function ProfileScreen() {
         { platform: 'youtube', connected: false },
       ]);
     } finally {
-      setLoading(false);
+      setLoadingConnections(false);
     }
   };
 
+  useEffect(() => {
+    fetchCredits();
+    fetchConnections();
+  }, []);
+
   const handleConnect = async (platform: string) => {
+    console.log(`User tapped Connect ${platform}`);
     try {
-      console.log(`[API] Connecting to ${platform}...`);
-      const data = await authenticatedPost<{ success: boolean; authUrl?: string }>(
-        '/api/social/connect',
-        { platform }
-      );
-      if (data.authUrl) {
-        showModal('Connect Account', `Please visit: ${data.authUrl}`);
-      }
-      await fetchConnections();
+      const data = await authenticatedPost<{ authUrl: string }>(`/api/social/connect/${platform}`, {});
+      console.log(`[API] Opening ${platform} auth URL:`, data.authUrl);
+      await Linking.openURL(data.authUrl);
+      showModal('Redirected', `Complete the ${platform} authorization in your browser.`);
     } catch (error: any) {
-      showModal('Connection Failed', error.message || `Failed to connect to ${platform}`);
+      console.error(`[API] Failed to connect ${platform}:`, error.message);
+      showModal('Connection Failed', error.message || `Failed to connect to ${platform}.`);
     }
   };
 
   const handleDisconnect = async (platform: string) => {
+    console.log(`User tapped Disconnect ${platform}`);
     try {
-      console.log(`[API] Disconnecting from ${platform}...`);
       await authenticatedDelete(`/api/social/disconnect/${platform}`);
-      await fetchConnections();
-      showModal('Disconnected', `Successfully disconnected from ${platform}`);
+      showModal('Disconnected', `${platform} has been disconnected.`);
+      fetchConnections();
     } catch (error: any) {
-      showModal('Disconnect Failed', error.message || `Failed to disconnect from ${platform}`);
+      console.error(`[API] Failed to disconnect ${platform}:`, error.message);
+      showModal('Error', error.message || `Failed to disconnect ${platform}.`);
     }
   };
 
-  const handleSubscribe = async (plan: 'monthly' | 'yearly') => {
-    setSubscribing(true);
-    try {
-      console.log(`[API] Creating checkout session for ${plan} plan...`);
-      const data = await authenticatedPost<{ checkoutUrl: string; sessionId: string }>(
-        '/api/subscriptions/create-checkout',
-        { plan }
-      );
-      if (data.checkoutUrl) {
-        console.log('[API] Checkout URL received, opening browser...');
-        const canOpen = await Linking.canOpenURL(data.checkoutUrl);
-        if (canOpen) {
-          await Linking.openURL(data.checkoutUrl);
-          showModal(
-            '🔗 Payment Page Opened',
-            'Complete your payment in the browser. Your subscription will activate automatically after payment.',
-            [
-              {
-                text: 'Refresh Status',
-                onPress: async () => {
-                  setModalVisible(false);
-                  await fetchCredits();
-                },
-                style: 'default',
-              },
-              { text: 'OK', onPress: () => setModalVisible(false), style: 'cancel' },
-            ]
-          );
-        } else {
-          showModal(
-            '💳 Complete Payment',
-            `Please visit this URL to complete your payment:\n\n${data.checkoutUrl}`,
-            [{ text: 'OK', onPress: () => setModalVisible(false), style: 'default' }]
-          );
-        }
-      } else {
-        showModal('✅ Success', `Successfully subscribed to ${plan} plan!`);
-        await fetchCredits();
-      }
-    } catch (error: any) {
-      showModal('Subscription Failed', error.message || 'Failed to start subscription process');
-    } finally {
-      setSubscribing(false);
-    }
+  const handleSubscribe = (plan: 'monthly' | 'yearly') => {
+    console.log(`User tapped Subscribe to ${plan}`);
+    router.push('/payment');
   };
 
   const handleSignOut = () => {
-    showModal(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        {
-          text: 'Cancel',
-          onPress: () => setModalVisible(false),
-          style: 'cancel',
-        },
-        {
-          text: 'Sign Out',
-          onPress: async () => {
-            setModalVisible(false);
-            try {
-              await signOut();
-            } catch (error) {
-              console.error('[Auth] Sign out error:', error);
-            }
-          },
-          style: 'destructive',
-        },
-      ]
-    );
+    setSignOutModalVisible(true);
   };
 
-  // Check if subscription is truly active (not expired)
+  const confirmSignOut = async () => {
+    console.log('User confirmed sign out');
+    setSignOutModalVisible(false);
+    try {
+      await signOut();
+      console.log('User signed out successfully');
+    } catch (error: any) {
+      console.error('Sign out error:', error);
+      showModal('Error', 'Failed to sign out. Please try again.');
+    }
+  };
+
   const hasActiveSubscription = creditInfo
     ? (creditInfo.subscriptionStatus === 'monthly' || creditInfo.subscriptionStatus === 'yearly') &&
       creditInfo.subscriptionEndDate !== null &&
       new Date(creditInfo.subscriptionEndDate) > new Date()
     : false;
 
-  const subscriptionStatusText = !hasActiveSubscription
-    ? 'Free Plan'
-    : creditInfo?.subscriptionStatus === 'monthly'
-    ? '✨ Monthly Subscription'
-    : '⭐ Yearly Subscription';
+  const isSubscribed = hasActiveSubscription;
+  const creditsDisplay = isSubscribed ? '∞ Unlimited edits' : `${creditInfo?.credits || 0} free edits remaining`;
 
-  const subscriptionStatusEmoji = !hasActiveSubscription ? '🆓' : creditInfo?.subscriptionStatus === 'yearly' ? '⭐' : '✨';
-
-  const creditsText = !hasActiveSubscription
-    ? `${creditInfo?.credits ?? 0} free edit${(creditInfo?.credits ?? 0) !== 1 ? 's' : ''} remaining`
-    : '∞ Unlimited edits';
+  const userName = user?.name || 'User';
+  const userEmail = user?.email || '';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
-          <Text style={styles.title}>Profile</Text>
+          <View style={styles.avatarContainer}>
+            <IconSymbol ios_icon_name="person.circle.fill" android_material_icon_name="account-circle" size={80} color={colors.primary} />
+          </View>
+          <Text style={styles.userName}>{userName}</Text>
+          <Text style={styles.userEmail}>{userEmail}</Text>
         </View>
 
-        {user && (
-          <View style={styles.userCard}>
-            <View style={styles.userInfo}>
-              <View style={styles.avatarPlaceholder}>
-                <IconSymbol
-                  ios_icon_name="person.fill"
-                  android_material_icon_name="person"
-                  size={40}
-                  color={colors.primary}
-                />
-              </View>
-              <View style={styles.userDetails}>
-                <Text style={styles.userName}>{user.name || 'User'}</Text>
-                <Text style={styles.userEmail}>{user.email}</Text>
-              </View>
-            </View>
-          </View>
-        )}
-
-        {creditInfo && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Credits & Subscription</Text>
-
-            <View style={[
-              styles.creditCard,
-              hasActiveSubscription && creditInfo.subscriptionStatus === 'yearly'
-                ? styles.creditCardYearly
-                : hasActiveSubscription
-                ? styles.creditCardPremium
-                : styles.creditCardFree
-            ]}>
-              <View style={styles.creditHeader}>
-                <Text style={[
-                  styles.creditTitle,
-                  hasActiveSubscription && creditInfo.subscriptionStatus === 'yearly' && styles.creditTitleYearly,
-                ]}>
-                  {subscriptionStatusText}
-                </Text>
-                {hasActiveSubscription && creditInfo.subscriptionEndDate && (
-                  <Text style={styles.creditExpiry}>
-                    Active until: {new Date(creditInfo.subscriptionEndDate).toLocaleDateString()}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Credits & Subscription</Text>
+          {loadingCredits ? (
+            <ActivityIndicator color={colors.primary} style={{ marginVertical: 20 }} />
+          ) : (
+            <>
+              <View
+                style={[
+                  styles.creditCard,
+                  isSubscribed && creditInfo?.subscriptionStatus === 'yearly'
+                    ? styles.creditCardYearly
+                    : isSubscribed
+                    ? styles.creditCardSubscribed
+                    : styles.creditCardFree,
+                ]}
+              >
+                <View style={styles.creditCardHeader}>
+                  <Text style={styles.creditCardEmoji}>
+                    {isSubscribed && creditInfo?.subscriptionStatus === 'yearly' ? '⭐' : isSubscribed ? '✨' : '⚡'}
+                  </Text>
+                  <View style={styles.creditCardInfo}>
+                    <Text style={styles.creditCardTitle}>
+                      {isSubscribed
+                        ? creditInfo?.subscriptionStatus === 'yearly'
+                          ? 'Yearly Subscriber'
+                          : 'Monthly Subscriber'
+                        : 'Free Plan'}
+                    </Text>
+                    <Text style={styles.creditCardCredits}>{creditsDisplay}</Text>
+                  </View>
+                </View>
+                {isSubscribed && creditInfo?.subscriptionEndDate && (
+                  <Text style={styles.creditCardExpiry}>
+                    Active until {new Date(creditInfo.subscriptionEndDate).toLocaleDateString()}
                   </Text>
                 )}
               </View>
-              <Text style={[
-                styles.creditAmount,
-                hasActiveSubscription && styles.creditAmountUnlimited,
-              ]}>{creditsText}</Text>
 
-              {hasActiveSubscription && creditInfo.subscriptionStatus === 'yearly' && (
-                <View style={styles.yearlyPerksContainer}>
-                  <Text style={styles.yearlyPerksTitle}>Your Yearly Perks:</Text>
-                  <Text style={styles.yearlyPerkItem}>⚡ Highest priority processing queue</Text>
-                  <Text style={styles.yearlyPerkItem}>🎁 Early access to new features</Text>
-                  <Text style={styles.yearlyPerkItem}>💬 Priority customer support</Text>
-                  <Text style={styles.yearlyPerkItem}>🎨 Exclusive templates & effects</Text>
-                  <Text style={styles.yearlyPerkItem}>📊 Advanced analytics dashboard</Text>
-                  <Text style={styles.yearlyPerkItem}>📤 Direct social media posting</Text>
+              {!isSubscribed && (
+                <View style={styles.upgradeSection}>
+                  <Text style={styles.upgradeTitle}>Upgrade for Unlimited Edits</Text>
+
+                  <TouchableOpacity
+                    style={[styles.subscriptionCard, styles.subscriptionCardMonthly]}
+                    onPress={() => handleSubscribe('monthly')}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.subscriptionHeader}>
+                      <Text style={styles.subscriptionEmoji}>✨</Text>
+                      <View style={styles.subscriptionInfo}>
+                        <Text style={styles.subscriptionName}>Monthly Plan</Text>
+                        <Text style={styles.subscriptionPrice}>€5/month</Text>
+                      </View>
+                    </View>
+                    <View style={styles.subscriptionPerks}>
+                      <Text style={styles.perkText}>• Unlimited video edits</Text>
+                      <Text style={styles.perkText}>• Priority processing</Text>
+                      <Text style={styles.perkText}>• Direct social media posting</Text>
+                    </View>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.subscriptionCard, styles.subscriptionCardYearly]}
+                    onPress={() => handleSubscribe('yearly')}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.bestValueBadge}>
+                      <Text style={styles.bestValueText}>BEST VALUE</Text>
+                    </View>
+                    <View style={styles.subscriptionHeader}>
+                      <Text style={styles.subscriptionEmoji}>⭐</Text>
+                      <View style={styles.subscriptionInfo}>
+                        <Text style={styles.subscriptionName}>Yearly Plan</Text>
+                        <Text style={styles.subscriptionPrice}>€50/year</Text>
+                      </View>
+                    </View>
+                    <View style={styles.subscriptionPerks}>
+                      <Text style={styles.perkText}>• Unlimited video edits</Text>
+                      <Text style={styles.perkText}>• Highest priority processing</Text>
+                      <Text style={styles.perkText}>• Direct social media posting</Text>
+                      <Text style={styles.perkText}>• Early access to new features</Text>
+                      <Text style={styles.perkText}>• Exclusive templates & effects</Text>
+                    </View>
+                  </TouchableOpacity>
                 </View>
               )}
-
-              {hasActiveSubscription && creditInfo.subscriptionStatus === 'monthly' && (
-                <View style={styles.monthlyPerksContainer}>
-                  <Text style={styles.monthlyPerkItem}>🎬 Priority processing</Text>
-                  <Text style={styles.monthlyPerkItem}>📤 Direct social media posting</Text>
-                </View>
-              )}
-
-              {hasActiveSubscription && (
-                <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={() => {
-                    showModal(
-                      'Cancel Subscription',
-                      'Your subscription will remain active until the end of the billing period. Are you sure?',
-                      [
-                        { text: 'Keep Subscription', onPress: () => setModalVisible(false), style: 'cancel' },
-                        {
-                          text: 'Cancel Subscription',
-                          onPress: async () => {
-                            setModalVisible(false);
-                            try {
-                              console.log('[API] Canceling subscription...');
-                              const result = await authenticatedPost<{ success: boolean; message: string }>(
-                                '/api/subscriptions/cancel',
-                                {}
-                              );
-                              showModal('Subscription Cancelled', result.message || 'Your subscription has been cancelled.');
-                              await fetchCredits();
-                            } catch (error: any) {
-                              showModal('Error', error.message || 'Failed to cancel subscription.');
-                            }
-                          },
-                          style: 'destructive',
-                        },
-                      ]
-                    );
-                  }}
-                >
-                  <Text style={styles.cancelButtonText}>Cancel Subscription</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {!hasActiveSubscription && (
-              <View style={styles.subscriptionOptions}>
-                <Text style={styles.upgradeTitle}>🚀 Upgrade for Unlimited Edits</Text>
-
-                <TouchableOpacity
-                  style={styles.planCard}
-                  onPress={() => handleSubscribe('monthly')}
-                  disabled={subscribing}
-                >
-                  <View style={styles.planHeader}>
-                    <Text style={styles.planName}>Monthly Plan</Text>
-                    <Text style={styles.planPrice}>€5/month</Text>
-                  </View>
-                  <Text style={styles.planFeatures}>♾️ Unlimited video edits</Text>
-                  <Text style={styles.planFeatures}>🎬 Priority processing</Text>
-                  <Text style={styles.planFeatures}>📤 Direct social media posting</Text>
-                  {subscribing ? (
-                    <ActivityIndicator color={colors.primary} style={{ marginTop: 12 }} />
-                  ) : (
-                    <View style={styles.planButton}>
-                      <Text style={styles.planButtonText}>Subscribe Monthly</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.planCard, styles.planCardYearly]}
-                  onPress={() => handleSubscribe('yearly')}
-                  disabled={subscribing}
-                >
-                  <View style={styles.bestValueBadge}>
-                    <Text style={styles.bestValueText}>⭐ BEST VALUE</Text>
-                  </View>
-                  <View style={styles.planHeader}>
-                    <Text style={styles.planName}>Yearly Plan</Text>
-                    <Text style={[styles.planPrice, { color: '#F59E0B' }]}>€50/year</Text>
-                  </View>
-                  <Text style={styles.planSavings}>💰 Save €10 per year!</Text>
-                  <Text style={styles.planFeatures}>♾️ Unlimited video edits</Text>
-                  <Text style={styles.planFeatures}>⚡ FASTEST priority processing</Text>
-                  <Text style={styles.planFeatures}>📤 Direct social media posting</Text>
-                  <Text style={styles.planFeatures}>🎁 Early access to new features</Text>
-                  <Text style={styles.planFeatures}>💬 Priority customer support</Text>
-                  <Text style={styles.planFeatures}>🎨 Exclusive templates & effects</Text>
-                  <Text style={styles.planFeatures}>📊 Advanced analytics dashboard</Text>
-                  {subscribing ? (
-                    <ActivityIndicator color={colors.primary} style={{ marginTop: 12 }} />
-                  ) : (
-                    <View style={[styles.planButton, styles.planButtonYearly]}>
-                      <Text style={styles.planButtonText}>Subscribe Yearly — Best Deal</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        )}
+            </>
+          )}
+        </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Social Media Connections</Text>
-
-          {loading ? (
-            <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
+          {loadingConnections ? (
+            <ActivityIndicator color={colors.primary} style={{ marginVertical: 20 }} />
           ) : (
-            connections.map((connection) => (
-              <View key={connection.platform} style={styles.connectionCard}>
+            connections.map((conn) => (
+              <View key={conn.platform} style={styles.connectionCard}>
                 <View style={styles.connectionInfo}>
                   <IconSymbol
-                    ios_icon_name={connection.platform === 'tiktok' ? 'music.note' : 'play.rectangle.fill'}
-                    android_material_icon_name={connection.platform === 'tiktok' ? 'music-note' : 'play-arrow'}
-                    size={28}
-                    color={connection.connected ? colors.success : colors.textMuted}
+                    ios_icon_name={conn.platform === 'tiktok' ? 'music.note' : 'play.rectangle.fill'}
+                    android_material_icon_name={conn.platform === 'tiktok' ? 'music-note' : 'play-arrow'}
+                    size={32}
+                    color={conn.connected ? colors.success : colors.textMuted}
                   />
-                  <View style={styles.connectionDetails}>
-                    <Text style={styles.connectionName}>
-                      {connection.platform === 'tiktok' ? 'TikTok' : 'YouTube'}
-                    </Text>
+                  <View style={styles.connectionText}>
+                    <Text style={styles.connectionPlatform}>{conn.platform === 'tiktok' ? 'TikTok' : 'YouTube'}</Text>
                     <Text style={styles.connectionStatus}>
-                      {connection.connected ? 'Connected ✓' : 'Not connected'}
+                      {conn.connected ? '✓ Connected' : 'Not connected'}
                     </Text>
                   </View>
                 </View>
                 <TouchableOpacity
-                  style={[
-                    styles.connectionButton,
-                    connection.connected && styles.connectionButtonDisconnect,
-                  ]}
-                  onPress={() =>
-                    connection.connected
-                      ? handleDisconnect(connection.platform)
-                      : handleConnect(connection.platform)
-                  }
+                  style={[styles.connectionButton, conn.connected && styles.connectionButtonDisconnect]}
+                  onPress={() => (conn.connected ? handleDisconnect(conn.platform) : handleConnect(conn.platform))}
                 >
-                  <Text
-                    style={[
-                      styles.connectionButtonText,
-                      connection.connected && styles.connectionButtonTextDisconnect,
-                    ]}
-                  >
-                    {connection.connected ? 'Disconnect' : 'Connect'}
-                  </Text>
+                  <Text style={styles.connectionButtonText}>{conn.connected ? 'Disconnect' : 'Connect'}</Text>
                 </TouchableOpacity>
               </View>
             ))
@@ -418,13 +280,8 @@ export default function ProfileScreen() {
 
         <View style={styles.section}>
           <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
-            <IconSymbol
-              ios_icon_name="arrow.right.square"
-              android_material_icon_name="logout"
-              size={20}
-              color={colors.error}
-            />
-            <Text style={styles.signOutText}>Sign Out</Text>
+            <IconSymbol ios_icon_name="arrow.right.square.fill" android_material_icon_name="logout" size={20} color={colors.error} />
+            <Text style={styles.signOutButtonText}>Sign Out</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -435,6 +292,25 @@ export default function ProfileScreen() {
         message={modalMessage}
         onClose={() => setModalVisible(false)}
         buttons={modalButtons}
+      />
+
+      <AppModal
+        visible={signOutModalVisible}
+        title="Sign Out"
+        message="Are you sure you want to sign out?"
+        onClose={() => setSignOutModalVisible(false)}
+        buttons={[
+          {
+            text: 'Cancel',
+            onPress: () => setSignOutModalVisible(false),
+            style: 'cancel',
+          },
+          {
+            text: 'Sign Out',
+            onPress: confirmSignOut,
+            style: 'destructive',
+          },
+        ]}
       />
     </SafeAreaView>
   );
@@ -447,48 +323,23 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 20,
-    paddingBottom: 120,
+    paddingBottom: 100,
   },
   header: {
-    marginBottom: 24,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  userCard: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  userInfo: {
-    flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 32,
   },
-  avatarPlaceholder: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: colors.primary + '20',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-  },
-  userDetails: {
-    flex: 1,
+  avatarContainer: {
+    marginBottom: 16,
   },
   userName: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: 'bold',
     color: colors.text,
     marginBottom: 4,
   },
   userEmail: {
-    fontSize: 14,
+    fontSize: 15,
     color: colors.textSecondary,
   },
   section: {
@@ -503,237 +354,174 @@ const styles = StyleSheet.create({
   creditCard: {
     borderRadius: 16,
     padding: 20,
-    marginBottom: 20,
     borderWidth: 2,
+    marginBottom: 16,
   },
   creditCardFree: {
-    backgroundColor: colors.warning + '15',
-    borderColor: colors.warning + '40',
+    backgroundColor: colors.card,
+    borderColor: colors.border,
   },
-  creditCardPremium: {
-    backgroundColor: colors.primary + '20',
+  creditCardSubscribed: {
+    backgroundColor: colors.primary + '15',
     borderColor: colors.primary + '60',
   },
   creditCardYearly: {
-    backgroundColor: '#F59E0B20',
+    backgroundColor: '#F59E0B15',
     borderColor: '#F59E0B60',
   },
-  creditHeader: {
-    marginBottom: 12,
-  },
-  creditTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  creditTitleYearly: {
-    color: '#F59E0B',
-  },
-  creditExpiry: {
-    fontSize: 13,
-    color: colors.textSecondary,
-  },
-  creditAmount: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.text,
-    marginBottom: 12,
-  },
-  creditAmountUnlimited: {
-    color: colors.primary,
-    fontSize: 28,
-  },
-  yearlyPerksContainer: {
-    backgroundColor: '#F59E0B10',
-    borderRadius: 12,
-    padding: 14,
-    marginTop: 4,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#F59E0B30',
-    gap: 6,
-  },
-  yearlyPerksTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#F59E0B',
-    marginBottom: 4,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  yearlyPerkItem: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    lineHeight: 18,
-  },
-  monthlyPerksContainer: {
-    backgroundColor: colors.primary + '10',
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 4,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: colors.primary + '30',
-    gap: 4,
-  },
-  monthlyPerkItem: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    lineHeight: 18,
-  },
-  cancelButton: {
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.error + '50',
-    marginTop: 4,
-  },
-  cancelButtonText: {
-    fontSize: 13,
-    color: colors.error,
-    fontWeight: '500',
-  },
-  subscriptionOptions: {
-    gap: 16,
-  },
-  upgradeTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 8,
-  },
-  planCard: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 2,
-    borderColor: colors.border,
-    position: 'relative',
-  },
-  planCardYearly: {
-    borderColor: '#F59E0B',
-    backgroundColor: '#F59E0B08',
-  },
-  bestValueBadge: {
-    position: 'absolute',
-    top: -12,
-    right: 16,
-    backgroundColor: '#F59E0B',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-  },
-  bestValueText: {
-    fontSize: 11,
-    fontWeight: 'bold',
-    color: '#000',
-    letterSpacing: 0.5,
-  },
-  planHeader: {
+  creditCardHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    gap: 12,
   },
-  planName: {
-    fontSize: 18,
-    fontWeight: 'bold',
+  creditCardEmoji: {
+    fontSize: 32,
+  },
+  creditCardInfo: {
+    flex: 1,
+  },
+  creditCardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
     color: colors.text,
+    marginBottom: 4,
   },
-  planPrice: {
+  creditCardCredits: {
     fontSize: 20,
     fontWeight: 'bold',
     color: colors.primary,
   },
-  planSavings: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.success,
-    marginBottom: 12,
-  },
-  planFeatures: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: 6,
-    lineHeight: 20,
-  },
-  planButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
+  creditCardExpiry: {
+    fontSize: 13,
+    color: colors.textMuted,
     marginTop: 12,
   },
-  planButtonYearly: {
-    backgroundColor: '#F59E0B',
+  upgradeSection: {
+    gap: 12,
   },
-  planButtonText: {
+  upgradeTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 8,
+  },
+  subscriptionCard: {
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 2,
+    position: 'relative',
+  },
+  subscriptionCardMonthly: {
+    backgroundColor: colors.primary + '10',
+    borderColor: colors.primary + '60',
+  },
+  subscriptionCardYearly: {
+    backgroundColor: '#F59E0B10',
+    borderColor: '#F59E0B60',
+  },
+  bestValueBadge: {
+    position: 'absolute',
+    top: -8,
+    right: 16,
+    backgroundColor: '#F59E0B',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  bestValueText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: colors.text,
+    letterSpacing: 0.5,
+  },
+  subscriptionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  subscriptionEmoji: {
+    fontSize: 28,
+  },
+  subscriptionInfo: {
+    flex: 1,
+  },
+  subscriptionName: {
     fontSize: 16,
     fontWeight: 'bold',
     color: colors.text,
   },
+  subscriptionPrice: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.primary,
+    marginTop: 2,
+  },
+  subscriptionPerks: {
+    gap: 4,
+  },
+  perkText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
   connectionCard: {
     backgroundColor: colors.card,
-    borderRadius: 16,
+    borderRadius: 12,
     padding: 16,
-    marginBottom: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: colors.border,
   },
   connectionInfo: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
     flex: 1,
   },
-  connectionDetails: {
-    marginLeft: 16,
+  connectionText: {
     flex: 1,
   },
-  connectionName: {
+  connectionPlatform: {
     fontSize: 16,
     fontWeight: '600',
     color: colors.text,
-    marginBottom: 4,
+    textTransform: 'capitalize',
   },
   connectionStatus: {
     fontSize: 13,
-    color: colors.textSecondary,
+    color: colors.textMuted,
+    marginTop: 2,
   },
   connectionButton: {
     backgroundColor: colors.primary,
-    borderRadius: 10,
+    borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
   connectionButtonDisconnect: {
-    backgroundColor: colors.border,
+    backgroundColor: colors.error,
   },
   connectionButtonText: {
     fontSize: 14,
     fontWeight: '600',
     color: colors.text,
   },
-  connectionButtonTextDisconnect: {
-    color: colors.textSecondary,
-  },
   signOutButton: {
     backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 18,
+    borderRadius: 12,
+    padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
+    gap: 8,
     borderWidth: 1,
     borderColor: colors.error + '40',
   },
-  signOutText: {
+  signOutButtonText: {
     fontSize: 16,
     fontWeight: '600',
     color: colors.error,
