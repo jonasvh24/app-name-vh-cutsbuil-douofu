@@ -120,7 +120,10 @@ export function registerSocialRoutes(app: App) {
           },
           400: {
             type: "object",
-            properties: { error: { type: "string" } },
+            properties: {
+              error: { type: "string" },
+              message: { type: "string" },
+            },
           },
           401: {
             type: "object",
@@ -152,7 +155,7 @@ export function registerSocialRoutes(app: App) {
         let authUrl: string;
 
         if (platform === "tiktok") {
-          // For testing, generate a mock OAuth URL even if credentials aren't configured
+          // Use configured credentials or mock for testing
           const clientId = TIKTOK_CLIENT_ID || "mock_tiktok_client_id";
           const scopes = ["user.info.basic", "video.upload", "video.publish"];
           const state = Buffer.from(JSON.stringify({ userId: session.user.id })).toString("base64");
@@ -165,7 +168,7 @@ export function registerSocialRoutes(app: App) {
             `state=${state}`;
         } else {
           // YouTube
-          // For testing, generate a mock OAuth URL even if credentials aren't configured
+          // Use configured credentials or mock for testing
           const clientId = YOUTUBE_CLIENT_ID || "mock_youtube_client_id";
           const scopes = [
             "https://www.googleapis.com/auth/youtube.upload",
@@ -227,9 +230,14 @@ export function registerSocialRoutes(app: App) {
             properties: {
               success: { type: "boolean" },
               message: { type: "string" },
+              platform: { type: "string" },
             },
           },
           400: {
+            type: "object",
+            properties: { error: { type: "string" } },
+          },
+          500: {
             type: "object",
             properties: { error: { type: "string" } },
           },
@@ -254,7 +262,7 @@ export function registerSocialRoutes(app: App) {
       }
 
       if (oauthError) {
-        app.logger.warn({ platform, error: oauthError }, "OAuth error");
+        app.logger.warn({ platform, error: oauthError }, "OAuth error from provider");
         return reply.status(400).send({ error: `OAuth error: ${oauthError}` });
       }
 
@@ -338,10 +346,11 @@ export function registerSocialRoutes(app: App) {
           );
         }
 
-        // Redirect to success page or return success
+        // Return success response (client can redirect as needed)
         return {
           success: true,
           message: `Successfully connected ${platform} account`,
+          platform,
         };
       } catch (error) {
         app.logger.error(
