@@ -49,14 +49,14 @@ export default function ProfileScreen() {
 
   const [signOutModalVisible, setSignOutModalVisible] = useState(false);
 
-  const showModal = (title: string, message: string, buttons?: any[]) => {
+  const showModal = useCallback((title: string, message: string, buttons?: any[]) => {
     setModalTitle(title);
     setModalMessage(message);
     setModalButtons(buttons || [{ text: 'OK', onPress: () => setModalVisible(false), style: 'default' }]);
     setModalVisible(true);
-  };
+  }, []);
 
-  const fetchCredits = async () => {
+  const fetchCredits = useCallback(async () => {
     setLoadingCredits(true);
     try {
       console.log('[Profile] Fetching credits...');
@@ -68,7 +68,7 @@ export default function ProfileScreen() {
     } finally {
       setLoadingCredits(false);
     }
-  };
+  }, []);
 
   const fetchConnections = useCallback(async () => {
     setLoadingConnections(true);
@@ -93,7 +93,7 @@ export default function ProfileScreen() {
   useEffect(() => {
     fetchCredits();
     fetchConnections();
-  }, [fetchConnections]);
+  }, [fetchConnections, fetchCredits]);
 
   useEffect(() => {
     const subscription = Linking.addEventListener('url', () => {
@@ -103,7 +103,7 @@ export default function ProfileScreen() {
     return () => subscription.remove();
   }, [fetchConnections]);
 
-  const handleConnect = async (platform: string) => {
+  const handleConnect = useCallback(async (platform: string) => {
     console.log(`[Profile] User tapped Connect button for platform: ${platform}`);
     setConnectingPlatform(platform);
     try {
@@ -117,10 +117,11 @@ export default function ProfileScreen() {
       }
 
       const canOpen = await Linking.canOpenURL(data.authUrl);
+      const platformDisplayName = platform === 'tiktok' ? 'TikTok' : 'YouTube';
+      
       if (canOpen) {
         console.log(`[Profile] Opening auth URL for ${platform}`);
         await Linking.openURL(data.authUrl);
-        const platformDisplayName = platform === 'tiktok' ? 'TikTok' : 'YouTube';
         showModal(
           'Authorization Opened',
           `Complete the ${platformDisplayName} authorization in your browser. Once done, return here and tap "Refresh" to update your connection status.`,
@@ -141,7 +142,6 @@ export default function ProfileScreen() {
           ]
         );
       } else {
-        const platformDisplayName = platform === 'tiktok' ? 'TikTok' : 'YouTube';
         showModal('Cannot Open Link', `Unable to open the authorization URL for ${platformDisplayName}. Please try again.`);
       }
     } catch (error: any) {
@@ -162,9 +162,9 @@ export default function ProfileScreen() {
     } finally {
       setConnectingPlatform(null);
     }
-  };
+  }, [showModal, fetchConnections]);
 
-  const handleDisconnect = async (platform: string) => {
+  const handleDisconnect = useCallback(async (platform: string) => {
     console.log(`[Profile] User tapped Disconnect button for platform: ${platform}`);
     const platformDisplayName = platform === 'tiktok' ? 'TikTok' : 'YouTube';
     showModal(
@@ -206,18 +206,18 @@ export default function ProfileScreen() {
         },
       ]
     );
-  };
+  }, [showModal, fetchConnections]);
 
-  const handleSubscribe = (plan: 'monthly' | 'yearly') => {
+  const handleSubscribe = useCallback((plan: 'monthly' | 'yearly') => {
     console.log(`[Profile] User tapped Subscribe to ${plan}`);
     router.push('/payment');
-  };
+  }, [router]);
 
-  const handleSignOut = () => {
+  const handleSignOut = useCallback(() => {
     setSignOutModalVisible(true);
-  };
+  }, []);
 
-  const confirmSignOut = async () => {
+  const confirmSignOut = useCallback(async () => {
     console.log('[Profile] User confirmed sign out');
     setSignOutModalVisible(false);
     try {
@@ -227,7 +227,7 @@ export default function ProfileScreen() {
       console.error('[Profile] Sign out error:', error);
       showModal('Error', 'Failed to sign out. Please try again.');
     }
-  };
+  }, [signOut, showModal]);
 
   const hasActiveSubscription = creditInfo
     ? (creditInfo.subscriptionStatus === 'monthly' || creditInfo.subscriptionStatus === 'yearly') &&
@@ -374,6 +374,7 @@ export default function ProfileScreen() {
             const isConnecting = connectingPlatform === conn.platform;
             const isDisconnecting = disconnectingPlatform === conn.platform;
             const isLoading = isConnecting || isDisconnecting;
+            const buttonText = conn.connected ? 'Disconnect' : 'Connect';
 
             return (
               <View key={conn.platform} style={styles.connectionCard}>
@@ -403,9 +404,7 @@ export default function ProfileScreen() {
                   {isLoading ? (
                     <ActivityIndicator size="small" color={colors.text} />
                   ) : (
-                    <Text style={styles.connectionButtonText}>
-                      {conn.connected ? 'Disconnect' : 'Connect'}
-                    </Text>
+                    <Text style={styles.connectionButtonText}>{buttonText}</Text>
                   )}
                 </TouchableOpacity>
               </View>
