@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Linking,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
@@ -31,8 +32,13 @@ interface CreditInfo {
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
   const router = useRouter();
-  const [connections, setConnections] = useState<SocialConnection[]>([]);
+  const [connections, setConnections] = useState<SocialConnection[]>([
+    { platform: 'tiktok', connected: false },
+    { platform: 'youtube', connected: false },
+  ]);
   const [loadingConnections, setLoadingConnections] = useState(false);
+  const [connectingPlatform, setConnectingPlatform] = useState<string | null>(null);
+  const [disconnectingPlatform, setDisconnectingPlatform] = useState<string | null>(null);
   const [creditInfo, setCreditInfo] = useState<CreditInfo | null>(null);
   const [loadingCredits, setLoadingCredits] = useState(false);
 
@@ -64,13 +70,16 @@ export default function ProfileScreen() {
     }
   };
 
-  const fetchConnections = async () => {
+  const fetchConnections = useCallback(async () => {
     setLoadingConnections(true);
     try {
       console.log('[API] Fetching social connections...');
       const data = await authenticatedGet<SocialConnection[]>('/api/social/connections');
-      setConnections(data);
       console.log('[API] Connections fetched:', data);
+      // Ensure both platforms are always shown
+      const tiktok = data.find((c) => c.platform === 'tiktok') || { platform: 'tiktok', connected: false };
+      const youtube = data.find((c) => c.platform === 'youtube') || { platform: 'youtube', connected: false };
+      setConnections([tiktok, youtube]);
     } catch (error: any) {
       console.error('[API] Failed to fetch connections:', error.message);
       setConnections([
@@ -80,36 +89,116 @@ export default function ProfileScreen() {
     } finally {
       setLoadingConnections(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchCredits();
     fetchConnections();
-  }, []);
+  }, [fetchConnections]);
+
+  // Refresh connections when app comes back to foreground (after OAuth redirect)
+  useEffect(() => {
+    const subscription = Linking.addEventListener('url', () => {
+      console.log('[Social] Deep link received, refreshing connections...');
+      setTimeout(() => fetchConnections(), 1000);
+    });
+    return () => subscription.remove();
+  }, [fetchConnections]);
 
   const handleConnect = async (platform: string) => {
-    console.log(`User tapped Connect ${platform}`);
+    console.log(`[API] User tapped Connect ${platform}`);
+    setConnectingPlatform(platform);
     try {
       const data = await authenticatedPost<{ authUrl: string }>(`/api/social/connect/${platform}`, {});
-      console.log(`[API] Opening ${platform} auth URL:`, data.authUrl);
-      await Linking.openURL(data.authUrl);
-      showModal('Redirected', `Complete the ${platform} authorization in your browser.`);
+      console.log(`[API] Got ${platform} auth URL:`, data.authUrl);
+
+      if (!data.authUrl) {
+        throw new Error(`No authorization URL returned for ${platform}`);
+      }
+
+      const canOpen = await Linking.canOpenURL(data.authUrl);
+      if (canOpen) {
+        await Linking.openURL(data.authUrl);
+        showModal(
+          'Authorization Opened',
+          `Complete the ${platform === 'tiktok' ? 'TikTok' : 'YouTube'} authorization in your browser. Once done, return here and tap "Refresh" to update your connection status.`,
+          [
+            {
+              text: 'Refresh',
+              onPress: () => {
+                setModalVisible(false);
+                fetchConnections();
+              },
+              style: 'default',
+            },
+            {
+              text: 'Later',
+              onPress: () => setModalVisible(false),
+              style: 'cancel',
+            },
+          ]
+        );
+      } else {
+        showModal('Cannot Open Link', `Unable to open the authorization URL for ${platform === 'tiktok' ? 'TikTok' : 'YouTube'}. Please try again.`);
+      }
     } catch (error: any) {
       console.error(`[API] Failed to connect ${platform}:`, error.message);
-      showModal('Connection Failed', error.message || `Failed to connect to ${platform}.`);
+      // Parse error message for better UX
+      let errorMsg = error.message || `Failed to connect to ${platform === 'tiktok' ? 'TikTok' : 'YouTube'}. Please try again.`;
+      if (errorMsg.includes('401') || errorMsg.includes('Authentication')) {
+        errorMsg = 'Please sign in again to connect your social accounts.';
+      } else if (errorMsg.includes('400')) {
+        errorMsg = `Invalid platform. Only TikTok and YouTube are supported.`;
+      } else if (errorMsg.includes('500')) {
+        errorMsg = `The ${platform === 'tiktok' ? 'TikTok' : 'YouTube'} connection service is temporarily unavailable. Please try again later.`;
+      }
+      showModal('Connection Failed', errorMsg);
+    } finally {
+      setConnectingPlatform(null);
     }
   };
 
   const handleDisconnect = async (platform: string) => {
-    console.log(`User tapped Disconnect ${platform}`);
-    try {
-      await authenticatedDelete(`/api/social/disconnect/${platform}`);
-      showModal('Disconnected', `${platform} has been disconnected.`);
-      fetchConnections();
-    } catch (error: any) {
-      console.error(`[API] Failed to disconnect ${platform}:`, error.message);
-      showModal('Error', error.message || `Failed to disconnect ${platform}.`);
-    }
+    console.log(`[API] User tapped Disconnect ${platform}`);
+    showModal(
+      `Disconnect ${platform === 'tiktok' ? 'TikTok' : 'YouTube'}`,
+      `Are you sure you want to disconnect your ${platform === 'tiktok' ? 'TikTok' : 'YouTube'} account?`,
+      [
+        {
+          text: 'Cancel',
+          onPress: () => setModalVisible(false),
+          style: 'cancel',
+        },
+        {
+          text: 'Disconnect',
+          onPress: async () => {
+            setModalVisible(false);
+            setDisconnectingPlatform(platform);
+            try {
+              await authenticatedDelete(`/api/social/disconnect/${platform}`);
+              console.log(`[API] ${platform} disconnected successfully`);
+              // Optimistically update UI
+              setConnections((prev) =>
+                prev.map((c) => (c.platform === platform ? { ...c, connected: false } : c))
+              );
+              showModal('Disconnected', `Your ${platform === 'tiktok' ? 'TikTok' : 'YouTube'} account has been disconnected.`);
+            } catch (error: any) {
+              console.error(`[API] Failed to disconnect ${platform}:`, error.message);
+              let errorMsg = error.message || `Failed to disconnect ${platform === 'tiktok' ? 'TikTok' : 'YouTube'}. Please try again.`;
+              if (errorMsg.includes('404')) {
+                errorMsg = `Your ${platform === 'tiktok' ? 'TikTok' : 'YouTube'} account is not connected.`;
+                // Refresh to sync state
+                fetchConnections();
+              }
+              showModal('Error', errorMsg);
+            } finally {
+              setDisconnectingPlatform(null);
+            }
+          },
+          style: 'destructive',
+        },
+      ]
+    );
   };
 
   const handleSubscribe = (plan: 'monthly' | 'yearly') => {
@@ -247,11 +336,33 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Social Media Connections</Text>
-          {loadingConnections ? (
-            <ActivityIndicator color={colors.primary} style={{ marginVertical: 20 }} />
-          ) : (
-            connections.map((conn) => (
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Social Media Connections</Text>
+            <TouchableOpacity
+              onPress={fetchConnections}
+              disabled={loadingConnections}
+              style={styles.refreshButton}
+            >
+              {loadingConnections ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <IconSymbol
+                  ios_icon_name="arrow.clockwise"
+                  android_material_icon_name="refresh"
+                  size={18}
+                  color={colors.primary}
+                />
+              )}
+            </TouchableOpacity>
+          </View>
+          {connections.map((conn) => {
+            const platformName = conn.platform === 'tiktok' ? 'TikTok' : 'YouTube';
+            const statusText = conn.connected ? '✓ Connected' : 'Not connected';
+            const isConnecting = connectingPlatform === conn.platform;
+            const isDisconnecting = disconnectingPlatform === conn.platform;
+            const isLoading = isConnecting || isDisconnecting;
+
+            return (
               <View key={conn.platform} style={styles.connectionCard}>
                 <View style={styles.connectionInfo}>
                   <IconSymbol
@@ -261,21 +372,32 @@ export default function ProfileScreen() {
                     color={conn.connected ? colors.success : colors.textMuted}
                   />
                   <View style={styles.connectionText}>
-                    <Text style={styles.connectionPlatform}>{conn.platform === 'tiktok' ? 'TikTok' : 'YouTube'}</Text>
-                    <Text style={styles.connectionStatus}>
-                      {conn.connected ? '✓ Connected' : 'Not connected'}
+                    <Text style={styles.connectionPlatform}>{platformName}</Text>
+                    <Text style={[styles.connectionStatus, conn.connected && styles.connectionStatusConnected]}>
+                      {statusText}
                     </Text>
                   </View>
                 </View>
                 <TouchableOpacity
-                  style={[styles.connectionButton, conn.connected && styles.connectionButtonDisconnect]}
+                  style={[
+                    styles.connectionButton,
+                    conn.connected && styles.connectionButtonDisconnect,
+                    isLoading && styles.connectionButtonLoading,
+                  ]}
                   onPress={() => (conn.connected ? handleDisconnect(conn.platform) : handleConnect(conn.platform))}
+                  disabled={isLoading}
                 >
-                  <Text style={styles.connectionButtonText}>{conn.connected ? 'Disconnect' : 'Connect'}</Text>
+                  {isLoading ? (
+                    <ActivityIndicator size="small" color={colors.text} />
+                  ) : (
+                    <Text style={styles.connectionButtonText}>
+                      {conn.connected ? 'Disconnect' : 'Connect'}
+                    </Text>
+                  )}
                 </TouchableOpacity>
               </View>
-            ))
-          )}
+            );
+          })}
         </View>
 
         <View style={styles.section}>
@@ -345,11 +467,27 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 32,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: colors.text,
-    marginBottom: 16,
+  },
+  refreshButton: {
+    padding: 6,
+    borderRadius: 8,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   creditCard: {
     borderRadius: 16,
@@ -489,21 +627,30 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: colors.text,
-    textTransform: 'capitalize',
   },
   connectionStatus: {
     fontSize: 13,
     color: colors.textMuted,
     marginTop: 2,
   },
+  connectionStatusConnected: {
+    color: colors.success,
+  },
   connectionButton: {
     backgroundColor: colors.primary,
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 8,
+    minWidth: 90,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 36,
   },
   connectionButtonDisconnect: {
     backgroundColor: colors.error,
+  },
+  connectionButtonLoading: {
+    opacity: 0.7,
   },
   connectionButtonText: {
     fontSize: 14,
