@@ -15,7 +15,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { AppModal } from '@/components/LoadingButton';
-import { authenticatedGet, authenticatedPost, authenticatedDelete } from '@/utils/api';
+import { authenticatedGet, authenticatedPost, authenticatedDelete, BACKEND_URL } from '@/utils/api';
 import { useRouter } from 'expo-router';
 
 interface SocialConnection {
@@ -59,12 +59,13 @@ export default function ProfileScreen() {
   const fetchCredits = useCallback(async () => {
     setLoadingCredits(true);
     try {
-      console.log('[Profile] Fetching credits...');
+      console.log('[Profile] Fetching credits from:', BACKEND_URL + '/api/user/credits');
       const data = await authenticatedGet<CreditInfo>('/api/user/credits');
       setCreditInfo(data);
-      console.log('[Profile] Credits fetched:', data);
+      console.log('[Profile] Credits fetched successfully:', data);
     } catch (error: any) {
-      console.error('[Profile] Failed to fetch credits:', error.message);
+      console.error('[Profile] Failed to fetch credits:', error);
+      console.error('[Profile] Error message:', error.message);
     } finally {
       setLoadingCredits(false);
     }
@@ -73,14 +74,15 @@ export default function ProfileScreen() {
   const fetchConnections = useCallback(async () => {
     setLoadingConnections(true);
     try {
-      console.log('[Profile] Fetching social connections...');
+      console.log('[Profile] Fetching social connections from:', BACKEND_URL + '/api/social/connections');
       const data = await authenticatedGet<SocialConnection[]>('/api/social/connections');
-      console.log('[Profile] Connections fetched:', data);
+      console.log('[Profile] Connections fetched successfully:', data);
       const tiktok = data.find((c) => c.platform === 'tiktok') || { platform: 'tiktok', connected: false };
       const youtube = data.find((c) => c.platform === 'youtube') || { platform: 'youtube', connected: false };
       setConnections([tiktok, youtube]);
     } catch (error: any) {
-      console.error('[Profile] Failed to fetch connections:', error.message);
+      console.error('[Profile] Failed to fetch connections:', error);
+      console.error('[Profile] Error message:', error.message);
       setConnections([
         { platform: 'tiktok', connected: false },
         { platform: 'youtube', connected: false },
@@ -91,26 +93,38 @@ export default function ProfileScreen() {
   }, []);
 
   useEffect(() => {
+    console.log('[Profile] Component mounted, backend URL:', BACKEND_URL);
     fetchCredits();
     fetchConnections();
   }, [fetchConnections, fetchCredits]);
 
   useEffect(() => {
-    const subscription = Linking.addEventListener('url', () => {
-      console.log('[Profile] Deep link received, refreshing connections...');
-      setTimeout(() => fetchConnections(), 1000);
+    const subscription = Linking.addEventListener('url', (event) => {
+      console.log('[Profile] Deep link received:', event.url);
+      setTimeout(() => {
+        console.log('[Profile] Refreshing connections after deep link...');
+        fetchConnections();
+      }, 1000);
     });
     return () => subscription.remove();
   }, [fetchConnections]);
 
   const handleConnect = useCallback(async (platform: string) => {
+    console.log(`[Profile] ========== CONNECT ${platform.toUpperCase()} STARTED ==========`);
     console.log(`[Profile] User tapped Connect button for platform: ${platform}`);
+    console.log(`[Profile] Backend URL: ${BACKEND_URL}`);
+    
     setConnectingPlatform(platform);
     try {
       const endpoint = `/api/social/connect/${platform}`;
-      console.log(`[Profile] Calling endpoint: ${endpoint}`);
+      const fullUrl = BACKEND_URL + endpoint;
+      console.log(`[Profile] Calling POST endpoint: ${fullUrl}`);
+      console.log(`[Profile] Request body: {}`);
+      
       const data = await authenticatedPost<{ authUrl: string }>(endpoint, {});
-      console.log(`[Profile] Received auth URL for ${platform}:`, data.authUrl);
+      
+      console.log(`[Profile] ✅ SUCCESS! Received response for ${platform}:`, data);
+      console.log(`[Profile] Auth URL: ${data.authUrl}`);
 
       if (!data.authUrl) {
         throw new Error(`No authorization URL returned for ${platform}`);
@@ -119,9 +133,13 @@ export default function ProfileScreen() {
       const canOpen = await Linking.canOpenURL(data.authUrl);
       const platformDisplayName = platform === 'tiktok' ? 'TikTok' : 'YouTube';
       
+      console.log(`[Profile] Can open URL: ${canOpen}`);
+      
       if (canOpen) {
-        console.log(`[Profile] Opening auth URL for ${platform}`);
+        console.log(`[Profile] Opening auth URL for ${platform}...`);
         await Linking.openURL(data.authUrl);
+        console.log(`[Profile] Auth URL opened successfully`);
+        
         showModal(
           'Authorization Opened',
           `Complete the ${platformDisplayName} authorization in your browser. Once done, return here and tap "Refresh" to update your connection status.`,
@@ -129,6 +147,7 @@ export default function ProfileScreen() {
             {
               text: 'Refresh',
               onPress: () => {
+                console.log(`[Profile] User tapped Refresh button`);
                 setModalVisible(false);
                 fetchConnections();
               },
@@ -136,13 +155,18 @@ export default function ProfileScreen() {
             },
             {
               text: 'Later',
-              onPress: () => setModalVisible(false),
+              onPress: () => {
+                console.log(`[Profile] User tapped Later button`);
+                setModalVisible(false);
+              },
               style: 'cancel',
             },
           ]
         );
       } else {
+        console.log(`[Profile] Cannot open URL directly, trying alternative method...`);
         if (Platform.OS === 'web') {
+          console.log(`[Profile] Opening in new tab (web platform)`);
           window.open(data.authUrl, '_blank');
           showModal(
             'Authorization Opened',
@@ -164,14 +188,19 @@ export default function ProfileScreen() {
             ]
           );
         } else {
+          console.error(`[Profile] Unable to open URL on platform: ${Platform.OS}`);
           showModal('Cannot Open Link', `Unable to open the authorization URL for ${platformDisplayName}. Please try again.`);
         }
       }
     } catch (error: any) {
-      console.error(`[Profile] Failed to connect ${platform}:`, error);
-      console.error(`[Profile] Error details:`, error.message, error.response);
+      console.error(`[Profile] ❌ FAILED to connect ${platform}`);
+      console.error(`[Profile] Error object:`, error);
+      console.error(`[Profile] Error message:`, error.message);
+      console.error(`[Profile] Error stack:`, error.stack);
+      
       const platformDisplayName = platform === 'tiktok' ? 'TikTok' : 'YouTube';
       let errorMsg = error.message || `Failed to connect to ${platformDisplayName}. Please try again.`;
+      
       if (errorMsg.includes('401') || errorMsg.includes('Authentication')) {
         errorMsg = 'Please sign in again to connect your social accounts.';
       } else if (errorMsg.includes('400')) {
@@ -181,8 +210,11 @@ export default function ProfileScreen() {
       } else if (errorMsg.includes('500')) {
         errorMsg = `The ${platformDisplayName} connection service is temporarily unavailable. Please try again later.`;
       }
+      
+      console.log(`[Profile] Showing error modal: ${errorMsg}`);
       showModal('Connection Failed', errorMsg);
     } finally {
+      console.log(`[Profile] ========== CONNECT ${platform.toUpperCase()} FINISHED ==========`);
       setConnectingPlatform(null);
     }
   }, [showModal, fetchConnections]);
@@ -196,17 +228,21 @@ export default function ProfileScreen() {
       [
         {
           text: 'Cancel',
-          onPress: () => setModalVisible(false),
+          onPress: () => {
+            console.log(`[Profile] User cancelled disconnect`);
+            setModalVisible(false);
+          },
           style: 'cancel',
         },
         {
           text: 'Disconnect',
           onPress: async () => {
+            console.log(`[Profile] User confirmed disconnect for ${platform}`);
             setModalVisible(false);
             setDisconnectingPlatform(platform);
             try {
               const endpoint = `/api/social/disconnect/${platform}`;
-              console.log(`[Profile] Calling endpoint: ${endpoint}`);
+              console.log(`[Profile] Calling DELETE endpoint: ${BACKEND_URL}${endpoint}`);
               await authenticatedDelete(endpoint);
               console.log(`[Profile] ${platform} disconnected successfully`);
               setConnections((prev) =>
@@ -237,6 +273,7 @@ export default function ProfileScreen() {
   }, [router]);
 
   const handleSignOut = useCallback(() => {
+    console.log('[Profile] User tapped Sign Out button');
     setSignOutModalVisible(true);
   }, []);
 
