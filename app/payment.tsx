@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,6 @@ import {
   TextInput,
   ActivityIndicator,
   Linking,
-  Alert,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { colors } from '@/styles/commonStyles';
@@ -32,59 +31,65 @@ export default function PaymentScreen() {
   const [modalTitle, setModalTitle] = useState('');
   const [modalMessage, setModalMessage] = useState('');
 
-  const showModal = (title: string, message: string) => {
+  const showModal = useCallback((title: string, message: string) => {
     setModalTitle(title);
     setModalMessage(message);
     setModalVisible(true);
-  };
+  }, []);
 
   const planPrice = selectedPlan === 'monthly' ? 5 : 50;
-  const planName = selectedPlan === 'monthly' ? 'Monthly' : 'Yearly';
 
-  const handlePayment = async () => {
-    console.log('User initiated payment:', { plan: selectedPlan, method: selectedMethod });
+  const handlePayment = useCallback(async () => {
+    console.log('[Payment] User initiated payment:', { plan: selectedPlan, method: selectedMethod });
     setProcessing(true);
 
     try {
       if (selectedMethod === 'card') {
-        console.log('[API] Initiating Stripe checkout...');
-        const data = await authenticatedPost<{ checkoutUrl: string; sessionId: string }>('/api/subscriptions/create-checkout', {
+        console.log('[Payment] Initiating card payment via /api/payments/initiate...');
+        const data = await authenticatedPost<{
+          success: boolean;
+          paymentMethod: string;
+          checkoutUrl?: string;
+          sessionId?: string;
+        }>('/api/payments/initiate', {
           plan: selectedPlan,
+          paymentMethod: 'card',
         });
-        console.log('[API] Stripe checkout response:', data);
+        console.log('[Payment] Card payment initiation response:', data);
 
-        if (!data.checkoutUrl) {
-          throw new Error('No checkout URL received from server');
-        }
+        setProcessing(false);
 
-        // Check if this is a mock/test URL
-        const isMockUrl = data.checkoutUrl.includes('checkout.stripe.com/pay/cs_') && 
-                          data.sessionId.startsWith('cs_') && 
-                          data.sessionId.length < 30;
+        // The backend returns a mock Stripe URL since Stripe is not yet configured.
+        // Real Stripe session IDs look like: cs_test_a1B2c3... or cs_live_a1B2c3...
+        // Mock session IDs from the backend look like: cs_<random alphanumeric without underscore after cs_>
+        const checkoutUrl = data.checkoutUrl || '';
+        const isRealStripeSession =
+          checkoutUrl.includes('cs_test_') || checkoutUrl.includes('cs_live_');
 
-        if (isMockUrl) {
-          setProcessing(false);
+        if (!isRealStripeSession) {
+          // Mock URL — Stripe is not configured on the backend
+          console.log('[Payment] Mock Stripe URL detected, showing informational message');
           showModal(
-            '⚠️ Test Mode',
-            'Stripe is not configured on the backend. This is a test checkout URL.\n\nIn production, this would redirect you to Stripe to complete payment.\n\nFor now, you can use PayPal or Bank Transfer to test the manual payment flow.'
+            '⚠️ Card Payments Coming Soon',
+            'Stripe card payment processing is not yet active.\n\nPlease use PayPal or Bank Transfer (IBAN) to subscribe. These payment methods are fully operational and your subscription will be activated within 24 hours.'
           );
           return;
         }
 
-        // Try to open the URL
-        const canOpen = await Linking.canOpenURL(data.checkoutUrl);
+        // Real Stripe URL — open it
+        console.log('[Payment] Opening real Stripe checkout URL...');
+        const canOpen = await Linking.canOpenURL(checkoutUrl);
         if (!canOpen) {
           throw new Error('Cannot open checkout URL. Please try a different payment method.');
         }
-
-        await Linking.openURL(data.checkoutUrl);
-        setProcessing(false);
+        await Linking.openURL(checkoutUrl);
         showModal(
-          'Redirected to Payment',
+          'Redirected to Stripe',
           'Complete your payment in the browser. Your subscription will activate automatically once payment is confirmed.'
         );
       } else {
-        console.log('[API] Initiating manual payment...');
+        // Manual payment methods (PayPal or IBAN)
+        console.log('[Payment] Initiating manual payment...');
         const data = await authenticatedPost<{
           success: boolean;
           paymentMethod: string;
@@ -97,7 +102,7 @@ export default function PaymentScreen() {
           paymentMethod: selectedMethod,
         });
 
-        console.log('[API] Manual payment initiated:', data);
+        console.log('[Payment] Manual payment initiated:', data);
         setProcessing(false);
         setShowManualConfirm(true);
 
@@ -108,20 +113,20 @@ export default function PaymentScreen() {
         showModal('Payment Instructions', instructionText);
       }
     } catch (error: any) {
-      console.error('[API] Payment initiation failed:', error);
+      console.error('[Payment] Payment initiation failed:', error);
       setProcessing(false);
       const errorMessage = error.message || 'Failed to initiate payment. Please try again.';
       showModal('Payment Error', errorMessage);
     }
-  };
+  }, [selectedPlan, selectedMethod, showModal]);
 
-  const handleConfirmManualPayment = async () => {
+  const handleConfirmManualPayment = useCallback(async () => {
     if (!transactionRef.trim()) {
       showModal('Missing Reference', 'Please enter your transaction reference number.');
       return;
     }
 
-    console.log('[API] Confirming manual payment:', { plan: selectedPlan, method: selectedMethod, ref: transactionRef });
+    console.log('[Payment] Confirming manual payment:', { plan: selectedPlan, method: selectedMethod, ref: transactionRef });
     setProcessing(true);
 
     try {
@@ -135,20 +140,22 @@ export default function PaymentScreen() {
         transactionReference: transactionRef,
       });
 
-      console.log('[API] Payment confirmed:', data);
+      console.log('[Payment] Payment confirmed:', data);
       setProcessing(false);
+      
+      const planName = selectedPlan === 'monthly' ? 'Monthly' : 'Yearly';
       showModal('🎉 Subscription Activated!', `Your ${planName} subscription is now active. Enjoy unlimited video edits!`);
       
       setTimeout(() => {
         router.replace('/(tabs)/(home)');
       }, 2000);
     } catch (error: any) {
-      console.error('[API] Payment confirmation failed:', error);
+      console.error('[Payment] Payment confirmation failed:', error);
       setProcessing(false);
       const errorMessage = error.message || 'Failed to confirm payment. Please contact support.';
       showModal('Confirmation Error', errorMessage);
     }
-  };
+  }, [selectedPlan, selectedMethod, transactionRef, showModal, router]);
 
   const monthlyPlanText = 'Monthly Plan';
   const yearlyPlanText = 'Yearly Plan';
@@ -164,6 +171,8 @@ export default function PaymentScreen() {
   const cardDescText = 'Instant activation via Stripe';
   const paypalDescText = 'Send to @jonasvanhuyssteen';
   const ibanDescText = 'Transfer to BE23 3632 3470 6391';
+
+  const subscribeButtonText = `Subscribe for €${planPrice}`;
 
   return (
     <>
@@ -326,7 +335,7 @@ export default function PaymentScreen() {
             <ActivityIndicator color={colors.text} size="small" />
           ) : (
             <>
-              <Text style={styles.subscribeButtonText}>Subscribe for €{planPrice}</Text>
+              <Text style={styles.subscribeButtonText}>{subscribeButtonText}</Text>
               <IconSymbol ios_icon_name="arrow.right.circle.fill" android_material_icon_name="arrow-forward" size={24} color={colors.text} />
             </>
           )}

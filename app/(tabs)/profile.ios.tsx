@@ -101,13 +101,39 @@ export default function ProfileScreen() {
   useEffect(() => {
     const subscription = Linking.addEventListener('url', (event) => {
       console.log('[Profile] Deep link received:', event.url);
-      setTimeout(() => {
-        console.log('[Profile] Refreshing connections after deep link...');
-        fetchConnections();
-      }, 1000);
+      
+      // Check if this is a social callback deep link
+      if (event.url.includes('social-callback')) {
+        const url = new URL(event.url);
+        const platform = url.searchParams.get('platform');
+        const status = url.searchParams.get('status');
+        const message = url.searchParams.get('message');
+        
+        console.log('[Profile] Social callback detected:', { platform, status, message });
+        
+        if (status === 'success') {
+          const platformName = platform === 'tiktok' ? 'TikTok' : 'YouTube';
+          showModal(
+            '✅ Connected!',
+            `Your ${platformName} account has been successfully connected.`
+          );
+        } else if (status === 'error') {
+          showModal(
+            'Connection Failed',
+            message || 'Failed to connect your account. Please try again.'
+          );
+        }
+        
+        // Refresh connections after a short delay
+        setTimeout(() => {
+          console.log('[Profile] Refreshing connections after OAuth callback...');
+          fetchConnections();
+        }, 1000);
+      }
     });
+    
     return () => subscription.remove();
-  }, [fetchConnections]);
+  }, [fetchConnections, showModal]);
 
   const handleConnect = useCallback(async (platform: string) => {
     console.log(`[Profile] ========== CONNECT ${platform.toUpperCase()} STARTED ==========`);
@@ -121,10 +147,21 @@ export default function ProfileScreen() {
       console.log(`[Profile] Calling POST endpoint: ${fullUrl}`);
       console.log(`[Profile] Request body: {}`);
       
-      const data = await authenticatedPost<{ authUrl: string }>(endpoint, {});
+      const data = await authenticatedPost<{ authUrl?: string; error?: string; message?: string }>(endpoint, {});
       
-      console.log(`[Profile] ✅ SUCCESS! Received response for ${platform}:`, data);
-      console.log(`[Profile] Auth URL: ${data.authUrl}`);
+      console.log(`[Profile] Response received for ${platform}:`, data);
+
+      // Check if OAuth is not configured
+      if (data.error === 'oauth_not_configured') {
+        console.log(`[Profile] OAuth not configured for ${platform}`);
+        setConnectingPlatform(null);
+        const platformName = platform === 'tiktok' ? 'TikTok' : 'YouTube';
+        showModal(
+          '⚠️ Not Available Yet',
+          data.message || `${platformName} integration is not yet configured. Please contact support to enable this feature.`
+        );
+        return;
+      }
 
       if (!data.authUrl) {
         throw new Error(`No authorization URL returned for ${platform}`);
@@ -141,27 +178,8 @@ export default function ProfileScreen() {
         console.log(`[Profile] Auth URL opened successfully`);
         
         showModal(
-          'Authorization Opened',
-          `Complete the ${platformDisplayName} authorization in your browser. Once done, return here and tap "Refresh" to update your connection status.`,
-          [
-            {
-              text: 'Refresh',
-              onPress: () => {
-                console.log(`[Profile] User tapped Refresh button`);
-                setModalVisible(false);
-                fetchConnections();
-              },
-              style: 'default',
-            },
-            {
-              text: 'Later',
-              onPress: () => {
-                console.log(`[Profile] User tapped Later button`);
-                setModalVisible(false);
-              },
-              style: 'cancel',
-            },
-          ]
+          'Authorization Started',
+          `Complete the ${platformDisplayName} authorization in your browser. You'll be redirected back to the app automatically when done.`
         );
       } else {
         console.log(`[Profile] Cannot open URL directly, trying alternative method...`);
@@ -169,23 +187,8 @@ export default function ProfileScreen() {
           console.log(`[Profile] Opening in new tab (web platform)`);
           window.open(data.authUrl, '_blank');
           showModal(
-            'Authorization Opened',
-            `Complete the ${platformDisplayName} authorization in the new tab. Once done, return here and tap "Refresh" to update your connection status.`,
-            [
-              {
-                text: 'Refresh',
-                onPress: () => {
-                  setModalVisible(false);
-                  fetchConnections();
-                },
-                style: 'default',
-              },
-              {
-                text: 'Later',
-                onPress: () => setModalVisible(false),
-                style: 'cancel',
-              },
-            ]
+            'Authorization Started',
+            `Complete the ${platformDisplayName} authorization in the new tab. You'll be redirected back automatically when done.`
           );
         } else {
           console.error(`[Profile] Unable to open URL on platform: ${Platform.OS}`);
@@ -217,7 +220,7 @@ export default function ProfileScreen() {
       console.log(`[Profile] ========== CONNECT ${platform.toUpperCase()} FINISHED ==========`);
       setConnectingPlatform(null);
     }
-  }, [showModal, fetchConnections]);
+  }, [showModal]);
 
   const handleDisconnect = useCallback((platform: string) => {
     console.log(`[Profile] User tapped Disconnect button for platform: ${platform}`);
