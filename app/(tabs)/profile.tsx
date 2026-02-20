@@ -59,12 +59,12 @@ export default function ProfileScreen() {
   const fetchCredits = async () => {
     setLoadingCredits(true);
     try {
-      console.log('[API] Fetching credits...');
+      console.log('[Profile] Fetching credits...');
       const data = await authenticatedGet<CreditInfo>('/api/user/credits');
       setCreditInfo(data);
-      console.log('[API] Credits fetched:', data);
+      console.log('[Profile] Credits fetched:', data);
     } catch (error: any) {
-      console.error('[API] Failed to fetch credits:', error.message);
+      console.error('[Profile] Failed to fetch credits:', error.message);
     } finally {
       setLoadingCredits(false);
     }
@@ -73,15 +73,14 @@ export default function ProfileScreen() {
   const fetchConnections = useCallback(async () => {
     setLoadingConnections(true);
     try {
-      console.log('[API] Fetching social connections...');
+      console.log('[Profile] Fetching social connections...');
       const data = await authenticatedGet<SocialConnection[]>('/api/social/connections');
-      console.log('[API] Connections fetched:', data);
-      // Ensure both platforms are always shown
+      console.log('[Profile] Connections fetched:', data);
       const tiktok = data.find((c) => c.platform === 'tiktok') || { platform: 'tiktok', connected: false };
       const youtube = data.find((c) => c.platform === 'youtube') || { platform: 'youtube', connected: false };
       setConnections([tiktok, youtube]);
     } catch (error: any) {
-      console.error('[API] Failed to fetch connections:', error.message);
+      console.error('[Profile] Failed to fetch connections:', error.message);
       setConnections([
         { platform: 'tiktok', connected: false },
         { platform: 'youtube', connected: false },
@@ -96,21 +95,22 @@ export default function ProfileScreen() {
     fetchConnections();
   }, [fetchConnections]);
 
-  // Refresh connections when app comes back to foreground (after OAuth redirect)
   useEffect(() => {
     const subscription = Linking.addEventListener('url', () => {
-      console.log('[Social] Deep link received, refreshing connections...');
+      console.log('[Profile] Deep link received, refreshing connections...');
       setTimeout(() => fetchConnections(), 1000);
     });
     return () => subscription.remove();
   }, [fetchConnections]);
 
   const handleConnect = async (platform: string) => {
-    console.log(`[API] User tapped Connect ${platform}`);
+    console.log(`[Profile] User tapped Connect button for platform: ${platform}`);
     setConnectingPlatform(platform);
     try {
-      const data = await authenticatedPost<{ authUrl: string }>(`/api/social/connect/${platform}`, {});
-      console.log(`[API] Got ${platform} auth URL:`, data.authUrl);
+      const endpoint = `/api/social/connect/${platform}`;
+      console.log(`[Profile] Calling endpoint: ${endpoint}`);
+      const data = await authenticatedPost<{ authUrl: string }>(endpoint, {});
+      console.log(`[Profile] Received auth URL for ${platform}:`, data.authUrl);
 
       if (!data.authUrl) {
         throw new Error(`No authorization URL returned for ${platform}`);
@@ -118,10 +118,12 @@ export default function ProfileScreen() {
 
       const canOpen = await Linking.canOpenURL(data.authUrl);
       if (canOpen) {
+        console.log(`[Profile] Opening auth URL for ${platform}`);
         await Linking.openURL(data.authUrl);
+        const platformDisplayName = platform === 'tiktok' ? 'TikTok' : 'YouTube';
         showModal(
           'Authorization Opened',
-          `Complete the ${platform === 'tiktok' ? 'TikTok' : 'YouTube'} authorization in your browser. Once done, return here and tap "Refresh" to update your connection status.`,
+          `Complete the ${platformDisplayName} authorization in your browser. Once done, return here and tap "Refresh" to update your connection status.`,
           [
             {
               text: 'Refresh',
@@ -139,12 +141,12 @@ export default function ProfileScreen() {
           ]
         );
       } else {
-        // On web, try opening in a new tab
         if (Platform.OS === 'web') {
           window.open(data.authUrl, '_blank');
+          const platformDisplayName = platform === 'tiktok' ? 'TikTok' : 'YouTube';
           showModal(
             'Authorization Opened',
-            `Complete the ${platform === 'tiktok' ? 'TikTok' : 'YouTube'} authorization in the new tab. Once done, return here and tap "Refresh" to update your connection status.`,
+            `Complete the ${platformDisplayName} authorization in the new tab. Once done, return here and tap "Refresh" to update your connection status.`,
             [
               {
                 text: 'Refresh',
@@ -162,19 +164,23 @@ export default function ProfileScreen() {
             ]
           );
         } else {
-          showModal('Cannot Open Link', `Unable to open the authorization URL for ${platform === 'tiktok' ? 'TikTok' : 'YouTube'}. Please try again.`);
+          const platformDisplayName = platform === 'tiktok' ? 'TikTok' : 'YouTube';
+          showModal('Cannot Open Link', `Unable to open the authorization URL for ${platformDisplayName}. Please try again.`);
         }
       }
     } catch (error: any) {
-      console.error(`[API] Failed to connect ${platform}:`, error.message);
-      // Parse error message for better UX
-      let errorMsg = error.message || `Failed to connect to ${platform === 'tiktok' ? 'TikTok' : 'YouTube'}. Please try again.`;
+      console.error(`[Profile] Failed to connect ${platform}:`, error);
+      console.error(`[Profile] Error details:`, error.message, error.response);
+      const platformDisplayName = platform === 'tiktok' ? 'TikTok' : 'YouTube';
+      let errorMsg = error.message || `Failed to connect to ${platformDisplayName}. Please try again.`;
       if (errorMsg.includes('401') || errorMsg.includes('Authentication')) {
         errorMsg = 'Please sign in again to connect your social accounts.';
       } else if (errorMsg.includes('400')) {
-        errorMsg = `Invalid platform. Only TikTok and YouTube are supported.`;
+        errorMsg = 'Invalid platform. Only TikTok and YouTube are supported.';
+      } else if (errorMsg.includes('404')) {
+        errorMsg = 'The social connection endpoint is not available. Please contact support.';
       } else if (errorMsg.includes('500')) {
-        errorMsg = `The ${platform === 'tiktok' ? 'TikTok' : 'YouTube'} connection service is temporarily unavailable. Please try again later.`;
+        errorMsg = `The ${platformDisplayName} connection service is temporarily unavailable. Please try again later.`;
       }
       showModal('Connection Failed', errorMsg);
     } finally {
@@ -183,10 +189,11 @@ export default function ProfileScreen() {
   };
 
   const handleDisconnect = async (platform: string) => {
-    console.log(`[API] User tapped Disconnect ${platform}`);
+    console.log(`[Profile] User tapped Disconnect button for platform: ${platform}`);
+    const platformDisplayName = platform === 'tiktok' ? 'TikTok' : 'YouTube';
     showModal(
-      `Disconnect ${platform === 'tiktok' ? 'TikTok' : 'YouTube'}`,
-      `Are you sure you want to disconnect your ${platform === 'tiktok' ? 'TikTok' : 'YouTube'} account?`,
+      `Disconnect ${platformDisplayName}`,
+      `Are you sure you want to disconnect your ${platformDisplayName} account?`,
       [
         {
           text: 'Cancel',
@@ -199,19 +206,19 @@ export default function ProfileScreen() {
             setModalVisible(false);
             setDisconnectingPlatform(platform);
             try {
-              await authenticatedDelete(`/api/social/disconnect/${platform}`);
-              console.log(`[API] ${platform} disconnected successfully`);
-              // Optimistically update UI
+              const endpoint = `/api/social/disconnect/${platform}`;
+              console.log(`[Profile] Calling endpoint: ${endpoint}`);
+              await authenticatedDelete(endpoint);
+              console.log(`[Profile] ${platform} disconnected successfully`);
               setConnections((prev) =>
                 prev.map((c) => (c.platform === platform ? { ...c, connected: false } : c))
               );
-              showModal('Disconnected', `Your ${platform === 'tiktok' ? 'TikTok' : 'YouTube'} account has been disconnected.`);
+              showModal('Disconnected', `Your ${platformDisplayName} account has been disconnected.`);
             } catch (error: any) {
-              console.error(`[API] Failed to disconnect ${platform}:`, error.message);
-              let errorMsg = error.message || `Failed to disconnect ${platform === 'tiktok' ? 'TikTok' : 'YouTube'}. Please try again.`;
+              console.error(`[Profile] Failed to disconnect ${platform}:`, error);
+              let errorMsg = error.message || `Failed to disconnect ${platformDisplayName}. Please try again.`;
               if (errorMsg.includes('404')) {
-                errorMsg = `Your ${platform === 'tiktok' ? 'TikTok' : 'YouTube'} account is not connected.`;
-                // Refresh to sync state
+                errorMsg = `Your ${platformDisplayName} account is not connected.`;
                 fetchConnections();
               }
               showModal('Error', errorMsg);
@@ -226,7 +233,7 @@ export default function ProfileScreen() {
   };
 
   const handleSubscribe = (plan: 'monthly' | 'yearly') => {
-    console.log(`User tapped Subscribe to ${plan}`);
+    console.log(`[Profile] User tapped Subscribe to ${plan}`);
     router.push('/payment');
   };
 
@@ -235,13 +242,13 @@ export default function ProfileScreen() {
   };
 
   const confirmSignOut = async () => {
-    console.log('User confirmed sign out');
+    console.log('[Profile] User confirmed sign out');
     setSignOutModalVisible(false);
     try {
       await signOut();
-      console.log('User signed out successfully');
+      console.log('[Profile] User signed out successfully');
     } catch (error: any) {
-      console.error('Sign out error:', error);
+      console.error('[Profile] Sign out error:', error);
       showModal('Error', 'Failed to sign out. Please try again.');
     }
   };
@@ -253,10 +260,15 @@ export default function ProfileScreen() {
     : false;
 
   const isSubscribed = hasActiveSubscription;
-  const creditsDisplay = isSubscribed ? '∞ Unlimited edits' : `${creditInfo?.credits || 0} free edits remaining`;
+  const infiniteSymbol = '∞';
+  const creditsDisplay = isSubscribed ? `${infiniteSymbol} Unlimited edits` : `${creditInfo?.credits || 0} free edits remaining`;
 
   const userName = user?.name || 'User';
   const userEmail = user?.email || '';
+
+  const yearlyEmoji = '⭐';
+  const monthlyEmoji = '✨';
+  const freeEmoji = '⚡';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -287,7 +299,7 @@ export default function ProfileScreen() {
               >
                 <View style={styles.creditCardHeader}>
                   <Text style={styles.creditCardEmoji}>
-                    {isSubscribed && creditInfo?.subscriptionStatus === 'yearly' ? '⭐' : isSubscribed ? '✨' : '⚡'}
+                    {isSubscribed && creditInfo?.subscriptionStatus === 'yearly' ? yearlyEmoji : isSubscribed ? monthlyEmoji : freeEmoji}
                   </Text>
                   <View style={styles.creditCardInfo}>
                     <Text style={styles.creditCardTitle}>
@@ -317,7 +329,7 @@ export default function ProfileScreen() {
                     activeOpacity={0.8}
                   >
                     <View style={styles.subscriptionHeader}>
-                      <Text style={styles.subscriptionEmoji}>✨</Text>
+                      <Text style={styles.subscriptionEmoji}>{monthlyEmoji}</Text>
                       <View style={styles.subscriptionInfo}>
                         <Text style={styles.subscriptionName}>Monthly Plan</Text>
                         <Text style={styles.subscriptionPrice}>€5/month</Text>
@@ -339,7 +351,7 @@ export default function ProfileScreen() {
                       <Text style={styles.bestValueText}>BEST VALUE</Text>
                     </View>
                     <View style={styles.subscriptionHeader}>
-                      <Text style={styles.subscriptionEmoji}>⭐</Text>
+                      <Text style={styles.subscriptionEmoji}>{yearlyEmoji}</Text>
                       <View style={styles.subscriptionInfo}>
                         <Text style={styles.subscriptionName}>Yearly Plan</Text>
                         <Text style={styles.subscriptionPrice}>€50/year</Text>
@@ -381,7 +393,8 @@ export default function ProfileScreen() {
           </View>
           {connections.map((conn) => {
             const platformName = conn.platform === 'tiktok' ? 'TikTok' : 'YouTube';
-            const statusText = conn.connected ? '✓ Connected' : 'Not connected';
+            const checkmark = '✓';
+            const statusText = conn.connected ? `${checkmark} Connected` : 'Not connected';
             const isConnecting = connectingPlatform === conn.platform;
             const isDisconnecting = disconnectingPlatform === conn.platform;
             const isLoading = isConnecting || isDisconnecting;
