@@ -105,24 +105,40 @@ export function registerVideoRoutes(app: App) {
       request: FastifyRequest,
       reply: FastifyReply
     ): Promise<{ videoUrl: string; videoId: string } | void> => {
-      app.logger.info("Starting video upload");
+      app.logger.info({ userId: (request as any).session?.user?.id }, "Starting video upload");
 
       const session = await requireAuth(request, reply);
       if (!session) return;
 
-      const data = await request.file({
-        limits: { fileSize: 500 * 1024 * 1024 },
-      }); // 500MB limit
-      if (!data) {
-        app.logger.warn("No video file provided");
-        return reply.status(400).send({ error: "No video file provided" });
+      app.logger.info({ userId: session.user.id }, "Parsing multipart form data");
+
+      let data;
+      try {
+        // Try to read the 'video' field first, then fall back to first file field
+        data = await request.file();
+        if (!data) {
+          app.logger.warn({ userId: session.user.id }, "No file field found in multipart form");
+          return reply.status(400).send({ error: "No video file provided" });
+        }
+
+        app.logger.debug(
+          { userId: session.user.id, fieldname: data.fieldname, filename: data.filename, encoding: data.encoding, mimetype: data.mimetype },
+          "File field received"
+        );
+      } catch (err) {
+        app.logger.warn({ err, userId: session.user.id }, "Error reading multipart form");
+        return reply.status(400).send({ error: "Invalid multipart form data" });
       }
 
       let buffer: Buffer;
       try {
         buffer = await data.toBuffer();
+        app.logger.debug(
+          { userId: session.user.id, size: buffer.length },
+          "File buffer created"
+        );
       } catch (err) {
-        app.logger.error({ err }, "Video file too large");
+        app.logger.error({ err, userId: session.user.id }, "Video file too large");
         return reply.status(413).send({ error: "File too large" });
       }
 
@@ -130,13 +146,14 @@ export function registerVideoRoutes(app: App) {
       const key = `uploads/${session.user.id}/videos/${videoId}`;
 
       try {
+        app.logger.info({ videoId, userId: session.user.id, key, bufferSize: buffer.length }, "Uploading video to storage");
         const uploadedKey = await app.storage.upload(key, buffer);
         const { url } = await app.storage.getSignedUrl(uploadedKey);
 
-        app.logger.info({ videoId, userId: session.user.id }, "Video uploaded successfully");
+        app.logger.info({ videoId, userId: session.user.id, url }, "Video uploaded successfully");
         return { videoUrl: url, videoId };
       } catch (error) {
-        app.logger.error({ err: error, videoId }, "Failed to upload video");
+        app.logger.error({ err: error, videoId, userId: session.user.id }, "Failed to upload video");
         throw error;
       }
     }
