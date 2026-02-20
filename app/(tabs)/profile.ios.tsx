@@ -142,7 +142,30 @@ export default function ProfileScreen() {
           ]
         );
       } else {
-        showModal('Cannot Open Link', `Unable to open the authorization URL for ${platformDisplayName}. Please try again.`);
+        if (Platform.OS === 'web') {
+          window.open(data.authUrl, '_blank');
+          showModal(
+            'Authorization Opened',
+            `Complete the ${platformDisplayName} authorization in the new tab. Once done, return here and tap "Refresh" to update your connection status.`,
+            [
+              {
+                text: 'Refresh',
+                onPress: () => {
+                  setModalVisible(false);
+                  fetchConnections();
+                },
+                style: 'default',
+              },
+              {
+                text: 'Later',
+                onPress: () => setModalVisible(false),
+                style: 'cancel',
+              },
+            ]
+          );
+        } else {
+          showModal('Cannot Open Link', `Unable to open the authorization URL for ${platformDisplayName}. Please try again.`);
+        }
       }
     } catch (error: any) {
       console.error(`[Profile] Failed to connect ${platform}:`, error);
@@ -164,7 +187,7 @@ export default function ProfileScreen() {
     }
   }, [showModal, fetchConnections]);
 
-  const handleDisconnect = useCallback(async (platform: string) => {
+  const handleDisconnect = useCallback((platform: string) => {
     console.log(`[Profile] User tapped Disconnect button for platform: ${platform}`);
     const platformDisplayName = platform === 'tiktok' ? 'TikTok' : 'YouTube';
     showModal(

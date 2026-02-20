@@ -108,7 +108,8 @@ export default function ProfileScreen() {
     setConnectingPlatform(platform);
     try {
       const endpoint = `/api/social/connect/${platform}`;
-      console.log(`[Profile] Calling endpoint: ${endpoint}`);
+      console.log(`[Profile] Calling POST endpoint: ${endpoint}`);
+      // Use authenticatedPost - backend route accepts POST with no required body
       const data = await authenticatedPost<{ authUrl: string }>(endpoint, {});
       console.log(`[Profile] Received auth URL for ${platform}:`, data.authUrl);
 
@@ -187,7 +188,7 @@ export default function ProfileScreen() {
     }
   }, [showModal, fetchConnections]);
 
-  const handleDisconnect = useCallback(async (platform: string) => {
+  const handleDisconnect = useCallback((platform: string) => {
     console.log(`[Profile] User tapped Disconnect button for platform: ${platform}`);
     const platformDisplayName = platform === 'tiktok' ? 'TikTok' : 'YouTube';
     showModal(

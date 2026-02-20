@@ -170,6 +170,7 @@ export default function HomeScreen() {
     console.log('[Upload] Video URI:', videoUri);
     console.log('[Upload] Video filename:', videoFileName);
     console.log('[Upload] Video mime type:', videoMimeType);
+    console.log('[Upload] Platform:', Platform.OS);
     setIsUploading(true);
 
     try {
@@ -177,15 +178,15 @@ export default function HomeScreen() {
       const token = await getBearerToken();
 
       const formData = new FormData();
-      
-      // For React Native, we need to provide the file as an object with uri, name, and type
+
+      // For React Native native (iOS), provide file as object with uri, name, and type
+      // Keep the file:// prefix - React Native handles it correctly
       const fileToUpload: any = {
-        uri: Platform.OS === 'android' ? videoUri : videoUri.replace('file://', ''),
+        uri: videoUri,
         name: videoFileName || 'video.mp4',
-        type: videoMimeType,
+        type: videoMimeType || 'video/mp4',
       };
-      
-      console.log('[Upload] File object being sent:', fileToUpload);
+      console.log('[Upload] iOS native: file object being sent:', fileToUpload);
       formData.append('video', fileToUpload);
 
       console.log('[Upload] Sending request to:', `${BACKEND_URL}/api/upload/video`);
@@ -193,7 +194,7 @@ export default function HomeScreen() {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
-          // Don't set Content-Type - let the browser/RN set it with the boundary
+          // Do NOT set Content-Type - let fetch set it automatically with the multipart boundary
         },
         body: formData,
       });

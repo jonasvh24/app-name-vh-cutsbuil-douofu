@@ -170,6 +170,7 @@ export default function HomeScreen() {
     console.log('[Upload] Video URI:', videoUri);
     console.log('[Upload] Video filename:', videoFileName);
     console.log('[Upload] Video mime type:', videoMimeType);
+    console.log('[Upload] Platform:', Platform.OS);
     setIsUploading(true);
 
     try {
@@ -177,23 +178,42 @@ export default function HomeScreen() {
       const token = await getBearerToken();
 
       const formData = new FormData();
-      
-      // For React Native, we need to provide the file as an object with uri, name, and type
-      const fileToUpload: any = {
-        uri: Platform.OS === 'android' ? videoUri : videoUri.replace('file://', ''),
-        name: videoFileName || 'video.mp4',
-        type: videoMimeType,
-      };
-      
-      console.log('[Upload] File object being sent:', fileToUpload);
-      formData.append('video', fileToUpload);
+
+      if (Platform.OS === 'web') {
+        // On web, ImagePicker returns a blob URL - fetch it and create a File object
+        console.log('[Upload] Web platform: fetching blob from URI...');
+        try {
+          const blobResponse = await fetch(videoUri);
+          const blob = await blobResponse.blob();
+          const fileName = videoFileName || 'video.mp4';
+          const mimeType = videoMimeType || blob.type || 'video/mp4';
+          const file = new File([blob], fileName, { type: mimeType });
+          console.log('[Upload] Web: created File object:', { name: file.name, size: file.size, type: file.type });
+          formData.append('video', file, fileName);
+        } catch (blobErr) {
+          console.error('[Upload] Web: failed to fetch blob, trying direct append:', blobErr);
+          // Fallback: try appending the URI directly (may work in some web environments)
+          formData.append('video', videoUri);
+        }
+      } else {
+        // For React Native native (iOS/Android), provide file as object with uri, name, and type
+        // Keep the file:// prefix for both iOS and Android - React Native handles it
+        const nativeUri = videoUri;
+        const fileToUpload: any = {
+          uri: nativeUri,
+          name: videoFileName || 'video.mp4',
+          type: videoMimeType || 'video/mp4',
+        };
+        console.log('[Upload] Native: file object being sent:', fileToUpload);
+        formData.append('video', fileToUpload);
+      }
 
       console.log('[Upload] Sending request to:', `${BACKEND_URL}/api/upload/video`);
       const uploadResponse = await fetch(`${BACKEND_URL}/api/upload/video`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
-          // Don't set Content-Type - let the browser/RN set it with the boundary
+          // Do NOT set Content-Type - let fetch set it automatically with the multipart boundary
         },
         body: formData,
       });
