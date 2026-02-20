@@ -7,6 +7,7 @@ import { registerSubscriptionRoutes } from './routes/subscriptions.js';
 import { registerPaymentRoutes } from './routes/payments.js';
 import { registerMusicRoutes } from './routes/music.js';
 import { registerEditingRoutes } from './routes/editing.js';
+import { registerSocialRoutes } from './routes/social.js';
 
 const schema = { ...appSchema, ...authSchema };
 
@@ -50,6 +51,7 @@ registerSubscriptionRoutes(app);
 registerPaymentRoutes(app);
 registerMusicRoutes(app);
 registerEditingRoutes(app);
+registerSocialRoutes(app);
 
 await initializeSpecialUser();
 

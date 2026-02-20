@@ -49,6 +49,22 @@ describe("API Integration Tests", () => {
       const data = await res.json();
       expect(data.error).toBeDefined();
     });
+
+    test("Upload video file too large should fail", async () => {
+      const form = new FormData();
+      // Create a large file (oversized)
+      const largeContent = new ArrayBuffer(600 * 1024 * 1024); // 600MB
+      form.append("file", new Blob([largeContent]), "large-video.mp4");
+
+      const res = await authenticatedApi("/api/upload/video", authToken, {
+        method: "POST",
+        body: form,
+      });
+      await expectStatus(res, 413);
+
+      const data = await res.json();
+      expect(data.error).toBeDefined();
+    });
   });
 
   // ============================================================================
@@ -198,6 +214,17 @@ describe("API Integration Tests", () => {
       await expectStatus(res, 404);
     });
 
+    test("Regenerate with invalid UUID format returns 400", async () => {
+      const res = await authenticatedApi(`/api/projects/invalid-uuid/regenerate`, authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: "Test",
+        }),
+      });
+      await expectStatus(res, 400);
+    });
+
     test("Publish project with valid platforms", async () => {
       const res = await authenticatedApi(`/api/projects/${projectId}/publish`, authToken, {
         method: "POST",
@@ -271,6 +298,17 @@ describe("API Integration Tests", () => {
         }),
       });
       await expectStatus(res, 404);
+    });
+
+    test("Publish with invalid UUID format returns 400", async () => {
+      const res = await authenticatedApi(`/api/projects/invalid-uuid/publish`, authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platforms: ["tiktok"],
+        }),
+      });
+      await expectStatus(res, 400);
     });
   });
 
@@ -854,6 +892,22 @@ describe("API Integration Tests", () => {
       await expectStatus(res, 404);
     });
 
+    test("Apply edits with invalid UUID format returns 400", async () => {
+      const res = await authenticatedApi(`/api/editing/invalid-uuid/apply-edits`, authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          edits: [
+            {
+              type: "trim",
+              params: { start: 0, end: 5 },
+            },
+          ],
+        }),
+      });
+      await expectStatus(res, 400);
+    });
+
     test("Apply edits successfully", async () => {
       const res = await authenticatedApi(`/api/editing/${projectId}/apply-edits`, authToken, {
         method: "POST",
@@ -940,6 +994,17 @@ describe("API Integration Tests", () => {
       await expectStatus(res, 404);
     });
 
+    test("Save edits with invalid UUID format returns 400", async () => {
+      const res = await authenticatedApi(`/api/editing/invalid-uuid/save`, authToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          changes: { title: "Updated Title" },
+        }),
+      });
+      await expectStatus(res, 400);
+    });
+
     test("Save edits with changes object successfully", async () => {
       const res = await authenticatedApi(`/api/editing/${projectId}/save`, authToken, {
         method: "POST",
@@ -956,6 +1021,119 @@ describe("API Integration Tests", () => {
       const data = await res.json();
       expect(data.success).toBeDefined();
       expect(data.projectId).toBe(projectId);
+    });
+  });
+
+  // ============================================================================
+  // Social Media Tests
+  // ============================================================================
+
+  describe("Social Media Management", () => {
+    test("Get social connections requires authentication", async () => {
+      const res = await api("/api/social/connections");
+      await expectStatus(res, 401);
+    });
+
+    test("Get social connections successfully", async () => {
+      const res = await authenticatedApi("/api/social/connections", authToken);
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(Array.isArray(data)).toBe(true);
+      data.forEach((connection: any) => {
+        expect(["tiktok", "youtube"]).toContain(connection.platform);
+        expect(typeof connection.connected).toBe("boolean");
+      });
+    });
+
+    test("Get OAuth URL requires authentication", async () => {
+      const res = await api("/api/social/connect/tiktok", {
+        method: "POST",
+      });
+      await expectStatus(res, 401);
+    });
+
+    test("Get OAuth URL with invalid platform fails", async () => {
+      const res = await authenticatedApi("/api/social/connect/instagram", authToken, {
+        method: "POST",
+      });
+      await expectStatus(res, 400);
+    });
+
+    test("Get OAuth URL for tiktok successfully", async () => {
+      const res = await authenticatedApi("/api/social/connect/tiktok", authToken, {
+        method: "POST",
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.authUrl).toBeDefined();
+      expect(typeof data.authUrl).toBe("string");
+    });
+
+    test("Get OAuth URL for youtube successfully", async () => {
+      const res = await authenticatedApi("/api/social/connect/youtube", authToken, {
+        method: "POST",
+      });
+      await expectStatus(res, 200);
+
+      const data = await res.json();
+      expect(data.authUrl).toBeDefined();
+      expect(typeof data.authUrl).toBe("string");
+    });
+
+    test("OAuth callback with error parameter returns 400", async () => {
+      const res = await api("/api/social/callback/tiktok?error=access_denied");
+      await expectStatus(res, 400);
+    });
+
+    test("OAuth callback with invalid platform fails", async () => {
+      const res = await api("/api/social/callback/instagram?code=test_code&state=test_state");
+      await expectStatus(res, 400);
+    });
+
+    test("Disconnect platform requires authentication", async () => {
+      const res = await api("/api/social/disconnect/tiktok", {
+        method: "DELETE",
+      });
+      await expectStatus(res, 401);
+    });
+
+    test("Disconnect with invalid platform fails", async () => {
+      const res = await authenticatedApi("/api/social/disconnect/instagram", authToken, {
+        method: "DELETE",
+      });
+      await expectStatus(res, 400);
+    });
+
+    test("Disconnect tiktok successfully", async () => {
+      const res = await authenticatedApi("/api/social/disconnect/tiktok", authToken, {
+        method: "DELETE",
+      });
+
+      // Accept both 200 (successful disconnect) and 404 (no connection to disconnect)
+      if (res.status === 200 || res.status === 404) {
+        const data = await res.json();
+        // Both 200 and 404 responses should have success field (true or false)
+        expect(typeof data.success === 'boolean' || data.error !== undefined).toBe(true);
+      } else {
+        throw new Error(`Unexpected status: ${res.status}`);
+      }
+    });
+
+    test("Disconnect youtube successfully", async () => {
+      const res = await authenticatedApi("/api/social/disconnect/youtube", authToken, {
+        method: "DELETE",
+      });
+
+      // Accept both 200 (successful disconnect) and 404 (no connection to disconnect)
+      if (res.status === 200 || res.status === 404) {
+        const data = await res.json();
+        // Both 200 and 404 responses should have success field (true or false)
+        expect(typeof data.success === 'boolean' || data.error !== undefined).toBe(true);
+      } else {
+        throw new Error(`Unexpected status: ${res.status}`);
+      }
     });
   });
 

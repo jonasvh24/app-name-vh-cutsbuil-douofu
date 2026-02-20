@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, integer } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, uuid, integer, boolean, uniqueIndex } from 'drizzle-orm/pg-core';
 
 export const videoProjects = pgTable('video_projects', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -24,3 +24,19 @@ export const creditTransactions = pgTable('credit_transactions', {
   description: text('description').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const socialConnections = pgTable('social_connections', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: text('user_id').notNull(),
+  platform: text('platform').notNull(),
+  accessToken: text('access_token'),
+  refreshToken: text('refresh_token'),
+  tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
+  platformUserId: text('platform_user_id'),
+  platformUsername: text('platform_username'),
+  connected: boolean('connected').default(true).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
+}, (table) => [
+  uniqueIndex('social_connections_user_platform_unique').on(table.userId, table.platform),
+]);
