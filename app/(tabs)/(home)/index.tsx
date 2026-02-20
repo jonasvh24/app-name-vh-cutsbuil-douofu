@@ -11,9 +11,12 @@ import {
   Modal,
   TextInput,
   Pressable,
+  Image,
+  Platform,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import { Video } from 'expo-video';
 import { colors } from '@/styles/commonStyles';
 import { IconSymbol } from '@/components/IconSymbol';
 import { useAuth } from '@/contexts/AuthContext';
@@ -45,6 +48,7 @@ export default function HomeScreen() {
 
   const [videoUri, setVideoUri] = useState<string | null>(null);
   const [videoFileName, setVideoFileName] = useState<string | null>(null);
+  const [videoMimeType, setVideoMimeType] = useState<string>('video/mp4');
   const [prompt, setPrompt] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -133,11 +137,21 @@ export default function HomeScreen() {
     });
 
     if (!result.canceled && result.assets[0]) {
-      console.log('Video selected:', result.assets[0].uri);
-      setVideoUri(result.assets[0].uri);
-      const uri = result.assets[0].uri;
-      const parts = uri.split('/');
-      setVideoFileName(parts[parts.length - 1] || 'video.mp4');
+      const asset = result.assets[0];
+      console.log('Video selected:', asset.uri);
+      console.log('Video details:', { fileName: asset.fileName, mimeType: asset.mimeType, fileSize: asset.fileSize });
+      
+      setVideoUri(asset.uri);
+      
+      // Extract filename
+      const fileName = asset.fileName || asset.uri.split('/').pop() || 'video.mp4';
+      setVideoFileName(fileName);
+      
+      // Determine mime type
+      const mimeType = asset.mimeType || 'video/mp4';
+      setVideoMimeType(mimeType);
+      
+      console.log('Video state updated:', { fileName, mimeType });
     }
   };
 
@@ -153,6 +167,9 @@ export default function HomeScreen() {
     }
 
     console.log('[API] Starting video upload and project creation...');
+    console.log('[Upload] Video URI:', videoUri);
+    console.log('[Upload] Video filename:', videoFileName);
+    console.log('[Upload] Video mime type:', videoMimeType);
     setIsUploading(true);
 
     try {
@@ -160,28 +177,37 @@ export default function HomeScreen() {
       const token = await getBearerToken();
 
       const formData = new FormData();
-      formData.append('video', {
-        uri: videoUri,
+      
+      // For React Native, we need to provide the file as an object with uri, name, and type
+      const fileToUpload: any = {
+        uri: Platform.OS === 'android' ? videoUri : videoUri.replace('file://', ''),
         name: videoFileName || 'video.mp4',
-        type: 'video/mp4',
-      } as any);
+        type: videoMimeType,
+      };
+      
+      console.log('[Upload] File object being sent:', fileToUpload);
+      formData.append('video', fileToUpload);
 
+      console.log('[Upload] Sending request to:', `${BACKEND_URL}/api/upload/video`);
       const uploadResponse = await fetch(`${BACKEND_URL}/api/upload/video`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
+          // Don't set Content-Type - let the browser/RN set it with the boundary
         },
         body: formData,
       });
 
+      console.log('[Upload] Response status:', uploadResponse.status);
+      
       if (!uploadResponse.ok) {
         const errText = await uploadResponse.text();
         console.error('[API] Upload failed:', uploadResponse.status, errText);
-        throw new Error(`Upload failed: ${uploadResponse.status}`);
+        throw new Error(`Upload failed: ${uploadResponse.status} - ${errText}`);
       }
 
       const uploadData = await uploadResponse.json();
-      console.log('[API] Video uploaded:', uploadData);
+      console.log('[API] Video uploaded successfully:', uploadData);
       const { videoUrl } = uploadData;
 
       setIsUploading(false);
@@ -363,32 +389,57 @@ export default function HomeScreen() {
         )}
 
         <View style={styles.uploadSection}>
-          <TouchableOpacity
-            style={[styles.uploadButton, videoUri && styles.uploadButtonSelected]}
-            onPress={pickVideo}
-            disabled={isUploading || isProcessing}
-          >
-            <IconSymbol
-              ios_icon_name="video.fill"
-              android_material_icon_name="videocam"
-              size={48}
-              color={videoUri ? colors.primary : colors.textMuted}
-            />
-            <Text style={styles.uploadButtonText}>{uploadButtonText}</Text>
-            {!videoUri && (
-              <Text style={styles.uploadHint}>Tap to select a video from your library</Text>
-            )}
-          </TouchableOpacity>
-
-          {videoUri && (
-            <View style={styles.videoStatus}>
+          {!videoUri ? (
+            <TouchableOpacity
+              style={styles.uploadButton}
+              onPress={pickVideo}
+              disabled={isUploading || isProcessing}
+            >
               <IconSymbol
-                ios_icon_name="checkmark.circle.fill"
-                android_material_icon_name="check-circle"
-                size={24}
-                color={colors.success}
+                ios_icon_name="video.fill"
+                android_material_icon_name="videocam"
+                size={48}
+                color={colors.textMuted}
               />
-              <Text style={styles.videoStatusText}>{videoSelectedText}</Text>
+              <Text style={styles.uploadButtonText}>{uploadButtonText}</Text>
+              <Text style={styles.uploadHint}>Tap to select a video from your library</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.videoPreviewContainer}>
+              <View style={styles.videoPreview}>
+                <Video
+                  source={{ uri: videoUri }}
+                  style={styles.videoPlayer}
+                  useNativeControls
+                  shouldPlay={false}
+                  isLooping={false}
+                />
+              </View>
+              <View style={styles.videoInfo}>
+                <View style={styles.videoInfoHeader}>
+                  <IconSymbol
+                    ios_icon_name="checkmark.circle.fill"
+                    android_material_icon_name="check-circle"
+                    size={24}
+                    color={colors.success}
+                  />
+                  <Text style={styles.videoInfoText}>{videoSelectedText}</Text>
+                </View>
+                <Text style={styles.videoFileName} numberOfLines={1}>{videoFileName}</Text>
+                <TouchableOpacity
+                  style={styles.changeVideoButton}
+                  onPress={pickVideo}
+                  disabled={isUploading || isProcessing}
+                >
+                  <IconSymbol
+                    ios_icon_name="arrow.triangle.2.circlepath"
+                    android_material_icon_name="refresh"
+                    size={18}
+                    color={colors.primary}
+                  />
+                  <Text style={styles.changeVideoText}>Change Video</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
         </View>
@@ -623,10 +674,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderStyle: 'dashed',
   },
-  uploadButtonSelected: {
-    borderColor: colors.primary,
-    borderStyle: 'solid',
-  },
   uploadButtonText: {
     fontSize: 18,
     fontWeight: '600',
@@ -638,17 +685,57 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: 6,
   },
-  videoStatus: {
+  videoPreviewContainer: {
+    backgroundColor: colors.card,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: colors.primary,
+  },
+  videoPreview: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    backgroundColor: '#000',
+  },
+  videoPlayer: {
+    width: '100%',
+    height: '100%',
+  },
+  videoInfo: {
+    padding: 16,
+  },
+  videoInfoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  videoInfoText: {
+    fontSize: 16,
+    color: colors.success,
+    fontWeight: '600',
+  },
+  videoFileName: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginBottom: 12,
+  },
+  changeVideoButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 14,
     gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    backgroundColor: colors.primary + '20',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.primary,
   },
-  videoStatusText: {
-    fontSize: 16,
-    color: colors.success,
-    fontWeight: '500',
+  changeVideoText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
   },
   promptSection: {
     marginBottom: 24,
